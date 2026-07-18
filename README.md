@@ -7,9 +7,11 @@ the data model, agent API, and clients ready for phased Xray support.
 
 ## Current status
 
-The repository is in **Phase 0: architecture and security planning**. No VPN,
-authentication, dashboard, or client functionality is implemented yet. See
-[`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for the exact status.
+Phase 0 is merged and **Phase 1.1: monorepo and CI scaffold** is implemented for
+review. The repository now contains runnable service probes and clearly labelled
+admin/mobile shells, but no authentication, database, email, WireGuard, Xray, or
+production deployment functionality. See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)
+for the exact status.
 
 ## Design principles
 
@@ -25,7 +27,7 @@ authentication, dashboard, or client functionality is implemented yet. See
 - Sensitive values belong in secret files or a secret manager, never Git.
 - Phase 1 targets one Ubuntu VPS without coupling the data model to one server.
 
-## Planned monorepo
+## Workspaces
 
 ```text
 apps/
@@ -59,3 +61,6 @@ Copy `.env.example` only for local development and replace placeholders outside
 Git. Production secrets will be mounted as files or supplied by a secret manager.
 Do not commit `.env`, private keys, certificates, WireGuard configurations, Xray
 profiles, subscription links, or database backups.
+
+See the [development guide](docs/development.md) for the pinned toolchain, quality
+gates, and loopback-only Compose stack.

@@ -1,0 +1,15 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+**/.coverage
+**/.dart_tool
+**/.mypy_cache
+**/.next
+**/.pytest_cache
+**/.ruff_cache
+**/__pycache__
+**/coverage
+**/node_modules
+**/test-results

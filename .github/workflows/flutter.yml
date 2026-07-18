@@ -1,0 +1,35 @@
+name: Flutter
+
+on:
+  pull_request:
+    paths: ["apps/mobile/**", ".github/workflows/flutter.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/mobile/**", ".github/workflows/flutter.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:3.44.0@sha256:46691e311715845de03a3ba4753a475476936805b29431b1f00f1816981033f8
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Resolve dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+      - name: Format
+        working-directory: apps/mobile
+        run: dart format --output=none --set-exit-if-changed .
+      - name: Analyze
+        working-directory: apps/mobile
+        run: flutter analyze --fatal-infos
+      - name: Test
+        working-directory: apps/mobile
+        run: flutter test

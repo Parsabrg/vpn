@@ -1,0 +1,34 @@
+name: Admin
+
+on:
+  pull_request:
+    paths: ["apps/admin/**", ".github/workflows/admin.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/admin/**", ".github/workflows/admin.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: admin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    container: node:24.18.0-bookworm-slim
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Activate pinned npm
+        run: npm install --global npm@11.18.0 && npm --version
+      - name: Install locked dependencies
+        working-directory: apps/admin
+        run: npm ci
+      - name: Audit production dependencies
+        working-directory: apps/admin
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Check
+        working-directory: apps/admin
+        run: npm run check

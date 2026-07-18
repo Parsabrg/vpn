@@ -1,0 +1,53 @@
+name: Python
+
+on:
+  pull_request:
+    paths:
+      [
+        "services/api/**",
+        "services/vpn-agent/**",
+        ".github/workflows/python.yml",
+      ]
+  push:
+    branches: [main]
+    paths:
+      [
+        "services/api/**",
+        "services/vpn-agent/**",
+        ".github/workflows/python.yml",
+      ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    container: python:3.14.6-slim-trixie
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Install workspaces
+        run: python -m pip install -e './services/api[dev]' -e './services/vpn-agent[dev]'
+      - name: Audit Python dependency graph
+        run: python -m pip_audit
+      - name: Ruff lint
+        run: python -m ruff check services/api services/vpn-agent
+      - name: Ruff format
+        run: python -m ruff format --check services/api services/vpn-agent
+      - name: Type check API
+        working-directory: services/api
+        run: python -m mypy
+      - name: Type check VPN agent
+        working-directory: services/vpn-agent
+        run: python -m mypy
+      - name: Test API
+        working-directory: services/api
+        run: python -m pytest
+      - name: Test VPN agent
+        working-directory: services/vpn-agent
+        run: python -m pytest
