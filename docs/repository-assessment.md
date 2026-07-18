@@ -20,16 +20,20 @@ The GitHub API reports:
 The repository therefore has no existing work to preserve. It also has no initial
 commit from which a feature branch can be created.
 
-## Access discrepancy
+## Access discrepancy — resolved
 
 Repository discovery succeeds, but a write through the connected GitHub App fails
 with `403 Resource not accessible by integration`. Account-level repository
 permission is not enough: the GitHub App installation must explicitly include this
 repository and grant Contents and Pull requests write permissions.
 
+The owner subsequently granted repository access. Read/write access was verified,
+`main` was initialized, and the Phase 0 work was published on
+`agent/phase-0-architecture` in draft pull request #1.
+
 ## Safe bootstrap sequence
 
-After access is granted:
+The bootstrap was completed in this order:
 
 1. Create the minimal initial commit on `main`.
 2. Create `agent/phase-0-architecture` from that commit.
@@ -38,8 +42,8 @@ After access is granted:
 5. Require CI and review before merging.
 6. Start implementation on a new feature branch after the Phase 0 PR merges.
 
-Direct production deployment is out of scope until the owner supplies deployment
-credentials and gives explicit permission.
+Direct production deployment remains out of scope until the owner supplies
+deployment credentials and gives explicit permission.
 
 ## Proposed repository policies
 

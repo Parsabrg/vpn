@@ -4,16 +4,19 @@ No real credential should be pasted into a GitHub issue, pull request, chat mess
 `.env`, or command history. Supply secrets through the chosen deployment secret
 mechanism when implementation reaches that integration point.
 
+## GitHub access — completed
+
+The connected GitHub integration now has access to `Parsabrg/vpn`. `main` is
+initialized and the Phase 0 files are available in draft pull request #1.
+
 ## Needed before Phase 1.1
 
-1. **GitHub App access:** grant the connected GitHub integration Contents and Pull
-   requests write access to `Parsabrg/vpn`. This is the current blocker.
-2. **Repository visibility:** confirm whether this security-sensitive project should
+1. **Repository visibility:** confirm whether this security-sensitive project should
    remain public. Public source is viable, but it increases the importance of never
    committing infrastructure details or secrets.
-3. **License:** choose a source license or mark the repository proprietary. Do not
+2. **License:** choose a source license or mark the repository proprietary. Do not
    add a license by assumption.
-4. **Supported versions:** confirm minimum Android API level and Windows versions.
+3. **Supported versions:** confirm minimum Android API level and Windows versions.
 
 ## Needed before production email tests
 
