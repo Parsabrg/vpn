@@ -3,6 +3,9 @@
 Phase 1 is split into reviewable vertical milestones. A milestone is complete only
 when its implementation, tests, documentation, and security checks pass. Native VPN
 features require target-platform verification; unit tests alone are insufficient.
+Phase 1 ships native WireGuard, but every shared layer is built against the generic
+protocol/profile model required by the final WireGuard plus Xray product. The Xray
+delivery phases are defined in `protocol-roadmap.md`.
 
 ## Phase 0 — architecture baseline (current)
 
@@ -35,8 +38,9 @@ Checks:
 
 Implement SQLAlchemy 2 models, enums, indexes, foreign keys, Alembic migrations,
 PostgreSQL integration fixtures, and the interactive initial-admin seed command.
-Create the identity, request, token, topology, assignment, peer, audit, email, health,
-and settings tables described in the architecture.
+Create the identity, request, token, topology, protocol profile/capability,
+assignment, credential, peer, audit, email, health, and settings tables described
+in the architecture.
 
 Checks include forward migration from empty DB, downgrade/upgrade where safe,
 constraint tests, normalized identity uniqueness, and migration smoke tests.
@@ -66,16 +70,23 @@ review actions, users, device/session controls, permissions, assignments, health
 email status, and audit views. Destructive actions require confirmation and step-up
 MFA where specified.
 
+Protocol controls operate on reviewed capability IDs; administrators cannot create
+raw Xray combinations or configuration fragments.
+
 Component and API-contract tests cover loading, empty, error, forbidden, expired
 session, keyboard, reduced-motion, and responsive states.
 
-## Phase 1.6 — VPN agent and WireGuard provisioning
+## Phase 1.6 — protocol-neutral VPN agent and WireGuard provisioning
 
 Implement the versioned mTLS agent API, typed command validation, operation
 idempotency, host hardening, address allocator, desired/actual state, atomic apply,
 peer revoke, health, reconciliation, and partial-failure recovery. Provide a fake
 WireGuard runner for CI and isolated Linux integration tests using network
 namespaces where the runner permits it.
+
+Define the protocol-driver interface and desired/actual provisioning state now.
+Only the native WireGuard driver is enabled in Phase 1; the Xray driver is added in
+the later milestone without changing the public control-plane contract.
 
 No endpoint accepts shell text or arbitrary configuration fragments.
 
@@ -84,6 +95,10 @@ No endpoint accepts shell text or arbitrary configuration fragments.
 Build Material 3 tokens, light/dark/system themes, Riverpod state, GoRouter routes,
 Dio client, secure token storage, splash, sign-in, request, activation, home shell,
 account, devices, settings, diagnostics, logs, and all connection states.
+
+The server/profile picker is capability-driven. In Phase 1 it displays WireGuard;
+later it displays only the Xray profiles enabled for that server and user without a
+client update for every new profile record.
 
 Flutter tests cover state transitions, token refresh serialization, revocation,
 offline behavior, accessibility labels, and reduced motion.
@@ -132,9 +147,13 @@ Run the complete lifecycle:
 9. Revoke access and confirm app sessions and WireGuard peer stop working.
 10. Restore a backup into a clean environment.
 11. Pass CI, dependency, secret, and container checks.
+12. Verify that disabled/unimplemented Xray profiles cannot be selected or
+    provisioned and that the generic driver contract rejects raw configuration.
 
 ## Definition of done
 
 The original 15 acceptance criteria remain authoritative. In addition, every claim
 must cite a passing automated check or a recorded target-platform verification.
 Known limitations must be visible in the UI and operations documentation.
+The final multi-protocol product is not complete when Phase 1 ends; Xray milestones
+have their own acceptance gates in `protocol-roadmap.md`.

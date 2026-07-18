@@ -19,6 +19,8 @@ The work is published for review in draft pull request #1.
 - Created an initial threat model and secret-handling contract.
 - Listed environment variables and external decisions required before deployment.
 - Created a milestone-based Phase 1 implementation and validation plan.
+- Classified Xray protocols, transports, security modes, and internal-only
+  components for phased delivery.
 - Granted the GitHub App access to `Parsabrg/vpn` and verified read/write access.
 - Initialized `main`, published `agent/phase-0-architecture`, and opened draft
   pull request #1.
@@ -37,9 +39,15 @@ The work is published for review in draft pull request #1.
 
 ## Decisions recorded
 
-- WireGuard is the only Phase 1 VPN protocol.
+- The final product provides user-selectable native WireGuard and Xray-core
+  protocol profiles.
+- Phase 1 delivers WireGuard first, but protocol permissions, server capabilities,
+  provisioning operations, and client selection are generic from the start.
+- Xray support is delivered in later protocol milestones, beginning with modern
+  VLESS profiles and expanding through a validated capability registry.
 - FastAPI remains unprivileged and cannot execute arbitrary host commands.
-- A separate host-side VPN agent owns WireGuard mutations.
+- A separate host-side VPN agent owns WireGuard and Xray mutations through typed,
+  allowlisted protocol drivers.
 - Client private keys are generated and retained on the client device.
 - API-to-agent communication uses mutual TLS and a versioned, allowlisted API.
 - Access JWTs are short lived; refresh and one-time tokens are random, rotated,

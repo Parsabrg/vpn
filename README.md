@@ -1,8 +1,9 @@
 # Nebula VPN
 
-Nebula VPN is a secure, approval-based VPN platform built around WireGuard. The
-target Phase 1 release includes a FastAPI control plane, a hardened VPN agent,
-a Next.js administrator dashboard, and Flutter clients for Android and Windows.
+Nebula VPN is a secure, approval-based multi-protocol VPN platform. The final
+product combines native WireGuard with Xray-core profiles selected by the user.
+Phase 1 delivers the secure control plane and WireGuard path first while keeping
+the data model, agent API, and clients ready for phased Xray support.
 
 ## Current status
 
@@ -15,8 +16,12 @@ authentication, dashboard, or client functionality is implemented yet. See
 - No unrestricted public registration.
 - Users choose their password through a single-use activation link.
 - Client WireGuard private keys never leave the device.
+- Xray credentials are unique per device/profile and never exposed through public
+  subscription URLs, logs, analytics, or error reports.
+- Users can select only protocol profiles enabled for their account and server.
 - The public API never receives root or unrestricted shell access.
-- VPN mutations are performed by a narrow, mutually authenticated agent.
+- VPN mutations are performed by narrow WireGuard and Xray drivers behind a
+  mutually authenticated agent.
 - Sensitive values belong in secret files or a secret manager, never Git.
 - Phase 1 targets one Ubuntu VPS without coupling the data model to one server.
 
@@ -28,7 +33,7 @@ apps/
   mobile/                Flutter Android and Windows client
 services/
   api/                   FastAPI control plane and worker
-  vpn-agent/             Hardened WireGuard management agent
+  vpn-agent/             Hardened WireGuard and Xray management agent
 infrastructure/
   compose/               Development and production Compose files
   nginx/                 Reverse proxy and TLS configuration
@@ -45,11 +50,12 @@ docs/                     Architecture, threat model, operations, and plans
 - [Threat model](docs/threat-model.md)
 - [Environment variables](docs/environment.md)
 - [Phase 1 plan](docs/phase-1-plan.md)
+- [WireGuard and Xray protocol roadmap](docs/protocol-roadmap.md)
 - [Decisions and credentials needed](docs/decisions-needed.md)
 
 ## Local configuration
 
 Copy `.env.example` only for local development and replace placeholders outside
 Git. Production secrets will be mounted as files or supplied by a secret manager.
-Do not commit `.env`, private keys, certificates, WireGuard configurations, or
-database backups.
+Do not commit `.env`, private keys, certificates, WireGuard configurations, Xray
+profiles, subscription links, or database backups.

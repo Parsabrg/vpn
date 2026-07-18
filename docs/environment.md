@@ -15,6 +15,7 @@ secret value itself.
 | `NEBULA_EMAIL_PROVIDER`        | `smtp` or `resend`                      |                            No |
 | SMTP host/user or Resend key   | Production delivery                     |        Key/password is secret |
 | `NEBULA_WG_PUBLIC_ENDPOINT`    | Client tunnel endpoint                  |                            No |
+| `NEBULA_XRAY_PUBLIC_HOST`      | Xray profile hostname                   |                            No |
 | VPS public IP and SSH policy   | Deployment target                       | Access credentials are secret |
 | `NEBULA_BACKUP_REMOTE`         | Off-host backup destination             |                    Usually no |
 | Backup destination credentials | Backup upload                           |                           Yes |
@@ -28,9 +29,11 @@ Generate these outside Git during deployment:
 - Ed25519 JWT signing private key and public key
 - Token hashing pepper
 - MFA seed-encryption key
+- Protocol-credential envelope-encryption key
 - SMTP password or Resend API key
 - Agent CA, API client certificate/key, and agent server certificate/key
 - WireGuard server private key
+- Xray TLS/REALITY private keys and per-profile server secrets
 - Backup destination credentials and offline age private identity
 
 The initial administrator password is entered interactively into the seed command;
@@ -75,7 +78,14 @@ the first API provider. Only the worker reads provider credentials. Email delive
 rows store template name, recipient, status, attempts, and redacted provider result;
 they do not retain raw one-time links in logs.
 
-## WireGuard and agent configuration
+## VPN agent and protocol configuration
+
+The shared agent uses mTLS and a typed protocol-driver contract. Static binary,
+directory, and secret-file paths come from the host environment. User-selectable
+protocol combinations come from a reviewed database capability registry and cannot
+be created from arbitrary environment strings or API-supplied JSON.
+
+### WireGuard
 
 Agent settings are host-side only. `NEBULA_WG_CLIENT_POOL` must not overlap the VPS
 LAN, Docker networks, or common client networks. The deployment preflight command
@@ -84,6 +94,21 @@ must reject overlaps and a pool too small for configured device limits.
 `NEBULA_WG_CLIENT_ALLOWED_IPS=0.0.0.0/0,::/0` represents full tunnel. IPv6 must not
 be advertised until routing and leak protection are tested; the safer initial
 deployment may temporarily use IPv4-only `0.0.0.0/0` and document that limitation.
+
+### Xray-core
+
+`NEBULA_XRAY_ENABLED` remains false until an Xray delivery milestone is deployed and
+verified. The host pins `NEBULA_XRAY_BINARY`, owns its configuration/state
+directories, and mounts TLS/REALITY keys through root-readable secret files. The
+agent validates a complete candidate before atomic apply and rollback.
+
+Xray access logging is disabled by default. Enabling operational statistics must
+use opaque internal labels and must not collect destinations, DNS queries, traffic
+content, client profiles, or credentials.
+
+Transport paths, service names, ports, and TLS/REALITY settings belong to reviewed
+server profile records. They are not authentication secrets, but changing them can
+break clients and therefore requires versioned rollout and compatibility tests.
 
 ## Retention and backups
 

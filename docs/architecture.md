@@ -2,9 +2,10 @@
 
 ## Goals
 
-Phase 1 must support the complete approval-to-connection lifecycle on one Ubuntu
-VPS while allowing VPN servers to be added later without redesigning identities,
-assignments, or provisioning state.
+Phase 1 must support the complete approval-to-connection lifecycle with native
+WireGuard on one Ubuntu VPS. The final product also supports user-selectable
+Xray-core profiles. Identity, permissions, server capabilities, credentials, and
+provisioning state must therefore be protocol-neutral from the first migration.
 
 ## System context
 
@@ -17,28 +18,31 @@ flowchart TD
     API --> Data["PostgreSQL + Redis"]
     API --> Worker["Background worker"]
     Worker --> Email["SMTP or Resend"]
-    API -->|"mTLS, allowlisted operations"| Agent["VPN agent"]
-    Agent -->|"validated atomic changes"| WG["WireGuard interface"]
-    User -->|"WireGuard tunnel"| WG
+    API -->|"mTLS, typed operations"| Agent["VPN agent"]
+    Agent --> WG["Native WireGuard"]
+    Agent --> Xray["Xray-core profiles"]
+    User -->|"Selected profile"| WG
+    User -->|"Selected profile"| Xray
 ```
 
 Nginx, the web applications, API, worker, PostgreSQL, and Redis can run in Docker
 Compose. The VPN agent should run as a hardened systemd service on the host because
-it needs tightly constrained network-administration capabilities. The public API
-containers remain unprivileged and do not mount the Docker socket or host root.
+it needs tightly constrained network-administration and process-control
+capabilities. The public API containers remain unprivileged and do not mount the
+Docker socket, host root, WireGuard keys, Xray credentials, or TLS private keys.
 
 ## Components and responsibilities
 
-| Component      | Responsibility                                                           | Explicitly forbidden                            |
-| -------------- | ------------------------------------------------------------------------ | ----------------------------------------------- |
-| Nginx          | TLS termination, request-size limit, headers, routing                    | Authentication decisions                        |
-| Next.js admin  | Authenticated administration UI and server-side API facade               | Direct database or agent access                 |
-| FastAPI        | Business rules, authorization, transactions, audit, agent orchestration  | Root, arbitrary shell, WireGuard private keys   |
-| Worker         | Durable email and maintenance jobs                                       | Becoming the source of truth                    |
-| PostgreSQL     | Identity, requests, permissions, assignments, provisioning intent, audit | Storing client private keys or plaintext tokens |
-| Redis          | Rate limits, admin sessions, job queue, short-lived coordination         | Permanent business records                      |
-| VPN agent      | Narrow peer create/update/revoke, health, reconcile                      | User auth, arbitrary command execution          |
-| Flutter client | Auth, device registration, local key generation, tunnel control          | Uploading or logging its private key            |
+| Component      | Responsibility                                                           | Explicitly forbidden                             |
+| -------------- | ------------------------------------------------------------------------ | ------------------------------------------------ |
+| Nginx          | TLS termination, request-size limit, headers, routing                    | Authentication decisions                         |
+| Next.js admin  | Authenticated administration UI and server-side API facade               | Direct database or agent access                  |
+| FastAPI        | Business rules, authorization, transactions, audit, agent orchestration  | Root, arbitrary shell, VPN private keys          |
+| Worker         | Durable email and maintenance jobs                                       | Becoming the source of truth                     |
+| PostgreSQL     | Identity, requests, permissions, assignments, provisioning intent, audit | Storing client private keys or plaintext tokens  |
+| Redis          | Rate limits, admin sessions, job queue, short-lived coordination         | Permanent business records                       |
+| VPN agent      | Typed WireGuard/Xray provision, revoke, health, validate, reconcile      | User auth, arbitrary config or command execution |
+| Flutter client | Auth, profile selection, secure credentials, TUN/tunnel control          | Logging or publicly exporting client credentials |
 
 ## Trust boundaries
 
@@ -50,10 +54,11 @@ containers remain unprivileged and do not mount the Docker socket or host root.
    no public ports.
 4. **API to VPN agent:** mutual TLS, certificate rotation, replay-resistant request
    identifiers, strict schema validation, and an operation allowlist.
-5. **Agent to host:** only validated WireGuard operations; hardened service unit,
-   minimal capabilities, root-owned configuration and key paths.
-6. **Client device:** device private keys and OS tunnel permissions remain outside
-   the server trust boundary.
+5. **Agent to protocol runtimes:** only validated WireGuard and Xray driver
+   operations; hardened service units, minimal capabilities, fixed binaries, and
+   root-owned configuration/key paths.
+6. **Client device:** WireGuard private keys, Xray credentials, generated profiles,
+   and OS tunnel permissions remain outside the public web trust boundary.
 
 ## Account approval and activation
 
@@ -102,23 +107,69 @@ and delivered asynchronously, preventing an email outage from corrupting approva
 - Step-up MFA for destructive user, server, and credential operations.
 - Lockout and rate limits by account and network prefix, with audit events.
 
-## VPN provisioning model
+## Protocol capability model
+
+Xray-core is an engine, not one protocol. Nebula uses a data-driven capability
+registry rather than allowing arbitrary combinations. Each `protocol_profile`
+defines a reviewed tuple of:
+
+- engine: native WireGuard or Xray-core
+- user-facing protocol: WireGuard, VLESS, VMess, Trojan, Shadowsocks, or Hysteria2
+- Xray transport where applicable: RAW, XHTTP, mKCP, gRPC, WebSocket, HTTPUpgrade,
+  or Hysteria
+- transport security where applicable: TLS or REALITY
+- compatible client platforms, required ports, DNS behavior, and feature flags
+
+The client protocol picker returns only profiles enabled on the selected server and
+allowed for the authenticated user. It never constructs a free-form combination.
+HTTP, SOCKS, TUN, dokodemo-door, DNS, Freedom, Blackhole, and Loopback remain
+internal Xray building blocks unless a later reviewed use case promotes one.
+
+The full classification and delivery order are in
+[`protocol-roadmap.md`](protocol-roadmap.md).
+
+## Provisioning model
+
+All drivers implement typed operations such as `provision_device`, `revoke_device`,
+`enable_device`, `get_client_profile`, `health`, and `reconcile`. The API never sends
+shell text, binary paths, or raw Xray JSON. Idempotency and desired/actual state are
+shared, while protocol-specific validation stays in the driver.
+
+Provisioning is an explicit state machine:
+
+`REQUESTED -> APPLYING -> ACTIVE -> REVOKING -> REVOKED`, with `FAILED` available
+at each mutation boundary. PostgreSQL records desired state; the agent reports
+actual state. A reconciliation job repairs safe drift and raises an alert for
+ambiguous drift.
+
+### Native WireGuard
 
 Each device owns one WireGuard peer. The client generates a key pair through native
 platform integration and retains the private key in Android Keystore-backed storage
 or Windows DPAPI/Credential Manager. It sends only the public key.
 
-Provisioning is an explicit state machine:
-
-`REQUESTED -> APPLYING -> ACTIVE -> REVOKING -> REVOKED`, with `FAILED` available
-at each mutation boundary. A unique constraint protects `(server_id, public_key)`
-and allocated tunnel IPs. PostgreSQL records desired state; the agent reports actual
-state. A reconciliation job repairs safe drift and raises an alert for ambiguous
-drift.
-
 The agent renders a validated candidate, checks it with WireGuard tooling, applies
 the delta with `wg syncconf`, and records an operation ID. Server private keys remain
 root-readable files on the VPN host. The API stores only public server information.
+
+### Xray-core
+
+Each Xray-enabled device/profile receives a unique credential; credentials are not
+shared between users or devices. Credential material is envelope-encrypted when the
+control plane must retain it, delivered only to the authenticated device, stored in
+platform-secure storage, and excluded from logs and public subscription URLs.
+
+The Xray driver accepts only a `protocol_profile_id` and typed credential intent. It
+renders configuration from trusted templates, validates the complete candidate with
+the pinned Xray binary, atomically applies it, verifies health, and rolls back to the
+last-known-good configuration on failure. TLS and REALITY private keys remain
+root-readable host files. Real user email addresses are never placed in Xray's user
+label field; opaque internal identifiers are used instead.
+
+Android feeds its OS-provided VPN file descriptor into the Xray TUN boundary;
+Windows uses Xray TUN/Wintun through a narrowly privileged service. Selecting an
+Xray profile must route system traffic through the OS VPN/TUN layer, not merely set
+an application proxy.
 
 ## Data model boundaries
 
@@ -127,9 +178,11 @@ The first migrations will include the required tables:
 - Identity: `users`, `admin_users`, `devices`, `user_sessions`, `refresh_tokens`
 - Approval: `account_requests`, `account_request_events`, `user_activations`
 - Recovery: `password_reset_tokens`
-- Authorization: `protocols`, `user_protocol_permissions`
-- Topology: `vpn_servers`, `user_server_assignments`
-- Provisioning: `wireguard_peers`, agent operation/reconciliation records
+- Authorization: `protocols`, `protocol_profiles`, `user_protocol_permissions`
+- Topology: `vpn_servers`, `server_protocol_capabilities`,
+  `user_server_assignments`
+- Provisioning: `device_protocol_credentials`, `wireguard_peers`, `xray_clients`,
+  agent operation/reconciliation records
 - Operations: `audit_logs`, `email_deliveries`, `server_health`, `settings`
 
 UUID primary keys are used at API boundaries. Normalized email and username columns
@@ -173,7 +226,8 @@ docs/
 
 ## Deployment evolution
 
-For one VPS, a server row still identifies the local WireGuard endpoint and agent.
-For additional servers, the API assigns users/devices to other server rows and
-calls each agent through the same versioned mTLS contract. The public control plane
-does not need a protocol-specific database redesign.
+For one VPS, a server row identifies the local agent and its enabled WireGuard/Xray
+profiles. For additional servers, the API assigns users/devices to other server
+rows and calls each agent through the same versioned mTLS contract. New reviewed
+Xray combinations are capability data plus a driver/template version, not a control
+plane redesign.

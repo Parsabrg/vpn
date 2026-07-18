@@ -10,7 +10,10 @@
 *.keystore
 *.mobileprovision
 *.wg.conf
+*.xray.json
+*.subscription.txt
 secrets/
+subscriptions/
 
 # Python
 __pycache__/
@@ -56,4 +59,3 @@ logs/
 backups/
 *.dump
 *.sql.gz
-
