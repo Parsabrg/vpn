@@ -62,10 +62,11 @@ it is never accepted as an environment variable or command-line argument.
 
 ## Data services
 
-`DATABASE_URL` uses an application role that cannot create roles or databases. A
-separate migration role is used only by deployment. `REDIS_URL` is internal-only
-and authenticated in production. PostgreSQL and Redis ports must not be published
-to the internet.
+`NEBULA_DATABASE_URL` uses an application role that cannot create roles, databases,
+or schema objects. `MIGRATION_DATABASE_URL` uses a separate migration role only for
+deployment and local migration commands. The two roles must differ in production.
+`REDIS_URL` is internal-only and authenticated in production. PostgreSQL and Redis
+ports must not be published to the internet.
 
 Redis production policy is AOF persistence with `appendfsync everysec`. Jobs and
 sessions may be reconstructed or invalidated, while PostgreSQL remains authoritative

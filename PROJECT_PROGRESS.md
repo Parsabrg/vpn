@@ -1,11 +1,11 @@
 # Project progress
 
-Last updated: 2026-07-18
+Last updated: 2026-07-20
 
 ## Current phase
 
-Phase 1.1 — monorepo and CI scaffold. Phase 0 was accepted and squash-merged in
-pull request #1.
+Phase 1.2 — database and identity foundation, implemented for review. Phase 0 was
+squash-merged in pull request #1 and Phase 1.1 in pull request #2.
 
 ## Completed
 
@@ -26,19 +26,43 @@ pull request #1.
   dependency review, secret scanning, and container vulnerability scanning.
 - Added exact tool/direct-dependency pins, an npm lockfile, Dependabot, root task
   commands, and a development guide.
+- Added 25 explicit PostgreSQL tables for identity, approval, tokens, reviewed
+  protocol topology, provisioning intent, audit, delivery, health, and settings.
+- Added three linear, immutable Alembic revisions with an exact runtime schema-head
+  check; application startup never runs migrations.
+- Added separate configurable login roles for application DML and migrations. A
+  fixed inherited runtime group cannot perform DDL, mutate the Alembic version, or
+  update/delete append-only audit rows.
+- Added deterministic email/username normalization, fixed-length token-digest and
+  envelope-encryption constraints, protocol-profile versioning, restrictive foreign
+  keys, and cross-table credential identity constraints.
+- Added an interactive, advisory-lock-protected initial-owner command using Argon2id.
+  It accepts passwords only through hidden confirmation prompts and writes its audit
+  event in the same transaction.
+- Changed `/readyz` to require PostgreSQL connectivity and the exact checked-in
+  migration head while retaining generic, non-sensitive probe responses.
+- Added a one-shot Compose migration service and PostgreSQL CI coverage for an
+  empty-database upgrade, metadata drift, application-role DDL denial, audit
+  append-only enforcement, and migration-version protection.
 
 ## Validation recorded locally
 
-- API: Ruff, format, strict mypy, 13 pytest tests, and 100% branch coverage pass.
+- API: Ruff, format, strict mypy across 32 source files, 100 pytest tests, and 98.09%
+  branch coverage pass; one live-PostgreSQL permission test is skipped locally.
 - VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
 - Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, production build, and
   production dependency audit pass.
 - Compose configuration renders successfully.
+- All three Alembic revisions render successfully as offline PostgreSQL SQL, and
+  static tests account for every one of the 25 model tables in both directions.
+- The installed Python dependency graph reports no known vulnerabilities; the two
+  local editable workspace packages are correctly not found on PyPI.
 - GitHub Action references use full commit SHAs.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
-widget tests, image builds, and the container health smoke test therefore remain CI
-gates rather than locally verified claims.
+widget tests, image builds, the container health smoke test, and the real PostgreSQL
+migration/permission round trip therefore remain CI gates rather than locally
+verified claims.
 
 ## External inputs pending
 
@@ -50,18 +74,18 @@ gates rather than locally verified claims.
 
 ## Next milestone
 
-- Review the Phase 1.1 scaffold and its CI results.
+- Review and merge the Phase 1.2 database foundation after all CI checks pass.
 - Generate Android and Windows host projects after support versions are confirmed.
-- Begin Phase 1.2 database and protocol-neutral identity/topology models in a
-  separate pull request.
+- Begin Phase 1.3 authentication and administrator security in a separate pull
+  request.
 
 ## Known limitations
 
-- No authentication, account approval, email delivery, database schema, VPN
-  provisioning, WireGuard, Xray, native tunnel integration, backup, or production
-  deployment exists yet.
-- Health probes demonstrate process state only; they are not proof of VPN or
-  dependency readiness.
+- The schema exists, but no authentication endpoint, account approval behavior,
+  email delivery, VPN provisioning, WireGuard/Xray runtime integration, native
+  tunnel integration, backup, or production deployment exists yet.
+- `/readyz` proves only API process state, database connectivity, and schema version;
+  it is not proof of Redis, email, VPN-agent, or tunnel readiness.
 - Python and Flutter direct dependencies are pinned, but their complete transitive
   graphs are not yet committed as platform-independent lock data.
 - Kill switch, DNS/IPv6 leak protection, and target-platform behavior remain

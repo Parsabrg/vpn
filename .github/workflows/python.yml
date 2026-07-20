@@ -6,6 +6,7 @@ on:
       [
         "services/api/**",
         "services/vpn-agent/**",
+        "infrastructure/postgres/**",
         ".github/workflows/python.yml",
       ]
   push:
@@ -14,6 +15,7 @@ on:
       [
         "services/api/**",
         "services/vpn-agent/**",
+        "infrastructure/postgres/**",
         ".github/workflows/python.yml",
       ]
 
@@ -28,11 +30,40 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     container: python:3.14.6-slim-trixie
+    services:
+      postgres:
+        image: postgres:17.10
+        env:
+          POSTGRES_DB: nebula
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-postgres-only
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nebula"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      POSTGRES_DB: nebula
+      POSTGRES_ADMIN_URL: postgresql://postgres:ci-postgres-only@postgres:5432/nebula
+      NEBULA_DB_APP_USER: nebula_app
+      NEBULA_DB_APP_PASSWORD: ci-app-only
+      NEBULA_DB_MIGRATOR_USER: nebula_migrator
+      NEBULA_DB_MIGRATOR_PASSWORD: ci-migrator-only
+      NEBULA_DATABASE_URL: postgresql+psycopg://nebula_app:ci-app-only@postgres:5432/nebula
+      MIGRATION_DATABASE_URL: postgresql+psycopg://nebula_migrator:ci-migrator-only@postgres:5432/nebula
     steps:
       # actions/checkout v7.0.0
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
       - name: Install workspaces
         run: python -m pip install -e './services/api[dev]' -e './services/vpn-agent[dev]'
+      - name: Create least-privilege database roles
+        run: python infrastructure/postgres/bootstrap_ci_roles.py
+      - name: Upgrade database from empty to head
+        working-directory: services/api
+        run: python -m alembic upgrade head
+      - name: Verify migration metadata is current
+        working-directory: services/api
+        run: python -m alembic check
       - name: Audit Python dependency graph
         run: python -m pip_audit
       - name: Ruff lint

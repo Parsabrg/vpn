@@ -8,7 +8,8 @@ mechanism when implementation reaches that integration point.
 
 The connected GitHub integration now has access to `Parsabrg/vpn`. `main` is
 initialized, and the Phase 0 architecture was squash-merged through pull request
-number 1. Phase 1.1 is now implemented on its review branch.
+number 1. The Phase 1.1 scaffold was squash-merged through pull request number 2;
+Phase 1.2 is implemented on its database-foundation review branch.
 
 ## Needed before platform packaging or public release
 
