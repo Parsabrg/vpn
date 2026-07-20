@@ -1,0 +1,172 @@
+name: nebula
+
+services:
+  postgres:
+    image: postgres:17.10
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nebula}
+      POSTGRES_USER: ${POSTGRES_USER:-nebula}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-local-only}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks: [backend]
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.8.0
+    command:
+      ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.30.4
+    environment:
+      MP_DATABASE: /data/mailpit.db
+    volumes:
+      - mailpit-data:/data
+    ports:
+      - "127.0.0.1:${MAILPIT_HTTP_PORT:-8025}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [backend]
+    restart: unless-stopped
+
+  vpn-agent:
+    build:
+      context: ./services/vpn-agent
+    environment:
+      NEBULA_ENV: development
+      NEBULA_LOG_LEVEL: INFO
+      NEBULA_WG_INTERFACE: wg0
+      NEBULA_WG_SERVER_PRIVATE_KEY_FILE: /run/nebula-mock/wireguard_server_private_key
+      NEBULA_XRAY_ENABLED: "false"
+      NEBULA_XRAY_BINARY: /usr/local/bin/xray
+      NEBULA_XRAY_CONFIG_DIR: /tmp/nebula/xray
+      NEBULA_XRAY_STATE_DIR: /tmp/nebula/state
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9443/readyz', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks: [backend]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./services/api
+    environment:
+      NEBULA_ENV: development
+      NEBULA_LOG_LEVEL: INFO
+      NEBULA_API_PUBLIC_URL: http://localhost:${API_PORT:-8000}
+      NEBULA_ALLOWED_ORIGINS: http://localhost:${ADMIN_PORT:-3000}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nebula}:${POSTGRES_PASSWORD:-replace-local-only}@postgres:5432/${POSTGRES_DB:-nebula}
+      REDIS_URL: redis://redis:6379/0
+      NEBULA_VPN_AGENT_URL: http://vpn-agent:9443
+      NEBULA_SMTP_HOST: mailpit
+      NEBULA_SMTP_PORT: "1025"
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+      vpn-agent:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    networks: [frontend, backend]
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ./apps/admin
+    environment:
+      NODE_ENV: production
+      NEBULA_API_INTERNAL_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:3000/api/health",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks: [frontend]
+    restart: unless-stopped
+
+networks:
+  frontend:
+  backend:
+    internal: true
+
+volumes:
+  postgres-data:
+  redis-data:
+  mailpit-data:

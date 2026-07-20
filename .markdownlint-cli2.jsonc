@@ -7,7 +7,9 @@
   },
   "globs": [
     "**/*.md",
-    "#upload/**",
-    "#node_modules/**"
+    "!upload/**",
+    "!**/node_modules/**",
+    "!**/.next/**",
+    "!**/.venv/**"
   ]
 }

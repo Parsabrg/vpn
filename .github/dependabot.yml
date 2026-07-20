@@ -1,0 +1,61 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /apps/admin
+    schedule:
+      interval: weekly
+    groups:
+      admin-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /services/api
+    schedule:
+      interval: weekly
+    groups:
+      api-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /services/vpn-agent
+    schedule:
+      interval: weekly
+    groups:
+      agent-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: pub
+    directory: /apps/mobile
+    schedule:
+      interval: weekly
+    groups:
+      mobile-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/api
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/vpn-agent
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /apps/admin
+    schedule:
+      interval: weekly

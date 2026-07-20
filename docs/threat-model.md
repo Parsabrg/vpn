@@ -59,7 +59,7 @@ Primary objectives:
 | Information disclosure | Public Xray subscription URL        | Authenticated profile API, per-device credentials, no public subscriptions  | A compromised device can export its active credential              |
 | Tampering              | Invalid protocol/transport pairing  | Reviewed compatibility registry; reject free-form combinations              | Registry updates require security review                           |
 | Elevation of privilege | Admin CSRF                          | SameSite=Strict, per-request CSRF tokens, origin checks                     | Browser extensions and local malware remain outside control        |
-| Supply chain           | Malicious package or Action         | Lockfiles, pinned Actions SHAs, dependency review, SBOM and image scan      | Scanners do not prove packages are benign                          |
+| Supply chain           | Malicious package or Action         | Lockfiles/exact pins, Action SHAs, image digests, dependency review, scans  | Python/Flutter transitive locks pending; scans cannot prove benign |
 
 ## Security-sensitive flows
 

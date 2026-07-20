@@ -4,9 +4,9 @@ Assessment date: 2026-07-18
 
 Repository: `https://github.com/Parsabrg/vpn`
 
-## Observed state
+## Initial observed state
 
-The GitHub API reports:
+At the start of Phase 0, the GitHub API reported:
 
 - Repository: `Parsabrg/vpn`
 - Visibility: public
@@ -29,7 +29,9 @@ repository and grant Contents and Pull requests write permissions.
 
 The owner subsequently granted repository access. Read/write access was verified,
 `main` was initialized, and the Phase 0 work was published on
-`agent/phase-0-architecture` in draft pull request #1.
+`agent/phase-0-architecture` in pull request #1. That pull request was subsequently
+squash-merged into `main`; the observations above are retained as the historical
+bootstrap snapshot.
 
 ## Safe bootstrap sequence
 

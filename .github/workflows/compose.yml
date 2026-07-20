@@ -1,0 +1,48 @@
+name: Compose
+
+on:
+  pull_request:
+    paths:
+      - "compose.yaml"
+      - ".dockerignore"
+      - "apps/admin/**"
+      - "services/api/**"
+      - "services/vpn-agent/**"
+      - ".github/workflows/compose.yml"
+  push:
+    branches: [main]
+    paths:
+      - "compose.yaml"
+      - ".dockerignore"
+      - "apps/admin/**"
+      - "services/api/**"
+      - "services/vpn-agent/**"
+      - ".github/workflows/compose.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Validate configuration
+        run: docker compose config --quiet
+      - name: Build and wait for health
+        run: docker compose up --build --detach --wait --wait-timeout 180
+      - name: Show service state
+        if: always()
+        run: docker compose ps
+      - name: Show failure logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose down --volumes --remove-orphans

@@ -7,7 +7,7 @@ Phase 1 ships native WireGuard, but every shared layer is built against the gene
 protocol/profile model required by the final WireGuard plus Xray product. The Xray
 delivery phases are defined in `protocol-roadmap.md`.
 
-## Phase 0 — architecture baseline (current)
+## Phase 0 — architecture baseline (complete)
 
 Deliverables:
 
@@ -20,7 +20,7 @@ Deliverables:
 
 Exit criteria: documentation is reviewed and merged; GitHub access is available.
 
-## Phase 1.1 — monorepo and CI scaffold
+## Phase 1.1 — monorepo and CI scaffold (current)
 
 Create the FastAPI, VPN agent, Next.js, and Flutter workspaces; pinned tool versions;
 development Compose; local Mailpit; formatting/linting/test commands; and GitHub

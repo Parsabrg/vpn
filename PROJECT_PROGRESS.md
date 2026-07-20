@@ -4,64 +4,65 @@ Last updated: 2026-07-18
 
 ## Current phase
 
-Phase 0 — repository assessment, architecture, threat model, and delivery plan.
-The work is published for review in draft pull request #1.
+Phase 1.1 — monorepo and CI scaffold. Phase 0 was accepted and squash-merged in
+pull request #1.
 
 ## Completed
 
-- Read and normalized the Phase 1 requirements.
-- Inspected `Parsabrg/vpn` through the connected GitHub application.
-- Confirmed the repository is public, empty, and has `main` configured as its
-  default branch.
-- Defined the proposed monorepo boundaries and one-VPS deployment topology.
-- Defined the security boundaries for the public API, administrator dashboard,
-  worker, database, Redis, VPN agent, WireGuard host, and clients.
-- Created an initial threat model and secret-handling contract.
-- Listed environment variables and external decisions required before deployment.
-- Created a milestone-based Phase 1 implementation and validation plan.
-- Classified Xray protocols, transports, security modes, and internal-only
-  components for phased delivery.
-- Granted the GitHub App access to `Parsabrg/vpn` and verified read/write access.
-- Initialized `main`, published `agent/phase-0-architecture`, and opened draft
-  pull request #1.
+- Defined and merged the multi-protocol architecture, threat model, environment
+  contract, and delivery roadmap.
+- Created independent FastAPI control-plane and VPN-agent packages with immutable,
+  validated settings and non-sensitive health/readiness probes.
+- Kept the API unprivileged and restricted the agent scaffold to two probe routes;
+  it accepts no shell text, protocol configuration, or provisioning operation.
+- Added non-root Python container images and an accessible, responsive Next.js
+  administration shell that explicitly labels unimplemented capabilities.
+- Added a Flutter 3.44 shared client shell and widget test without claiming native
+  tunnel support.
+- Added a loopback-only development Compose stack with PostgreSQL, persistent Redis,
+  Mailpit, isolated networks, health gates, read-only application containers, and
+  a capability-free mock agent.
+- Added minimal-permission CI for Python, Next.js, Flutter, Compose smoke testing,
+  dependency review, secret scanning, and container vulnerability scanning.
+- Added exact tool/direct-dependency pins, an npm lockfile, Dependabot, root task
+  commands, and a development guide.
+
+## Validation recorded locally
+
+- API: Ruff, format, strict mypy, 13 pytest tests, and 100% branch coverage pass.
+- VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
+- Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, production build, and
+  production dependency audit pass.
+- Compose configuration renders successfully.
+- GitHub Action references use full commit SHAs.
+
+The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
+widget tests, image builds, and the container health smoke test therefore remain CI
+gates rather than locally verified claims.
 
 ## External inputs pending
 
-- Domain name, administrator email, production email provider, VPS details, and
-  backup destination have not been supplied.
-- Android and Windows tunnel verification requires real target devices or VMs.
+- Repository visibility and source license.
+- Minimum supported Android and Windows versions.
+- Domain, administrator email, production email provider, VPS details, capacity,
+  network ranges, and backup destination.
+- Android and Windows tunnel verification devices or VMs.
 
-## Pending
+## Next milestone
 
-- Review and merge draft pull request #1 when the architecture is accepted.
-- Obtain decisions listed in `docs/decisions-needed.md`.
-- Begin Phase 1.1 repository and CI scaffold only after Phase 0 review.
-
-## Decisions recorded
-
-- The final product provides user-selectable native WireGuard and Xray-core
-  protocol profiles.
-- Phase 1 delivers WireGuard first, but protocol permissions, server capabilities,
-  provisioning operations, and client selection are generic from the start.
-- Xray support is delivered in later protocol milestones, beginning with modern
-  VLESS profiles and expanding through a validated capability registry.
-- FastAPI remains unprivileged and cannot execute arbitrary host commands.
-- A separate host-side VPN agent owns WireGuard and Xray mutations through typed,
-  allowlisted protocol drivers.
-- Client private keys are generated and retained on the client device.
-- API-to-agent communication uses mutual TLS and a versioned, allowlisted API.
-- Access JWTs are short lived; refresh and one-time tokens are random, rotated,
-  hashed at rest, and revocable.
-- Administrator sessions use secure HttpOnly cookies, CSRF protection, and TOTP
-  MFA with hashed recovery codes.
-- Email is delivered through a durable database outbox plus a Redis-backed worker.
-- SMTP and Resend are the initial email provider implementations.
-- Redis uses AOF persistence (`appendfsync everysec`) in production because it
-  carries sessions, rate limits, and background jobs; PostgreSQL remains the
-  source of truth.
+- Review the Phase 1.1 scaffold and its CI results.
+- Generate Android and Windows host projects after support versions are confirmed.
+- Begin Phase 1.2 database and protocol-neutral identity/topology models in a
+  separate pull request.
 
 ## Known limitations
 
-- This phase contains plans and contracts, not runnable application code.
-- No claims are made yet about VPN connectivity, leak protection, kill switches,
-  native integrations, deployment, backups, or end-to-end security.
+- No authentication, account approval, email delivery, database schema, VPN
+  provisioning, WireGuard, Xray, native tunnel integration, backup, or production
+  deployment exists yet.
+- Health probes demonstrate process state only; they are not proof of VPN or
+  dependency readiness.
+- Python and Flutter direct dependencies are pinned, but their complete transitive
+  graphs are not yet committed as platform-independent lock data.
+- Kill switch, DNS/IPv6 leak protection, and target-platform behavior remain
+  unimplemented and unverified.

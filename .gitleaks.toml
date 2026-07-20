@@ -1,0 +1,12 @@
+title = "Nebula secret scanning policy"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known local-only placeholders"
+regexTarget = "match"
+regexes = [
+  '''replace-local-only''',
+  '''replace_with_public_recipient''',
+]
