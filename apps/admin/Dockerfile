@@ -1,4 +1,4 @@
-FROM node:24.18.0-alpine3.23 AS toolchain
+FROM node:26.5.0-alpine3.23 AS toolchain
 RUN npm install --global npm@11.18.0
 
 FROM toolchain AS dependencies
@@ -13,7 +13,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
 
-FROM node:24.18.0-alpine3.23 AS runner
+FROM node:26.5.0-alpine3.23 AS runner
 WORKDIR /app
 ENV HOSTNAME=0.0.0.0
 ENV NODE_ENV=production
