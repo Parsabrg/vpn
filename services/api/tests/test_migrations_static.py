@@ -50,6 +50,13 @@ def test_every_metadata_table_is_created_and_dropped_once() -> None:
     assert set(dropped) == expected
 
 
+def test_deferred_request_user_foreign_key_is_emitted_explicitly() -> None:
+    identity_revision = (VERSIONS / "20260720_0001_protocol-neutral.py").read_text(encoding="utf-8")
+
+    assert "op.create_foreign_key(" in identity_revision
+    assert "fk_account_requests_user_id_users" in identity_revision
+
+
 def test_operations_revision_and_bootstraps_enforce_runtime_role_boundaries() -> None:
     operations = (VERSIONS / "20260720_0003_operations.py").read_text(encoding="utf-8")
     compose_bootstrap = (

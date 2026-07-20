@@ -411,6 +411,17 @@ def upgrade() -> None:
         postgresql_where=sa.text("state = 'pending'"),
     )
 
+    # SQLAlchemy omits use_alter constraints from CREATE TABLE. Emit this one
+    # explicitly so the reviewed request/user pairing exists in PostgreSQL.
+    op.create_foreign_key(
+        op.f("fk_account_requests_user_id_users"),
+        "account_requests",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="RESTRICT",
+    )
+
     op.create_table(
         "account_request_events",
         sa.Column("request_id", sa.UUID(), nullable=False),

@@ -47,7 +47,7 @@ squash-merged in pull request #1 and Phase 1.1 in pull request #2.
 
 ## Validation recorded locally
 
-- API: Ruff, format, strict mypy across 32 source files, 99 pytest tests, and 98.09%
+- API: Ruff, format, strict mypy across 32 source files, 100 pytest tests, and 98.09%
   branch coverage pass; one live-PostgreSQL permission test is skipped locally.
 - VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
 - Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, production build, and
