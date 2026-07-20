@@ -11,6 +11,8 @@ RUN groupadd --gid 10001 nebula \
     && useradd --uid 10001 --gid nebula --no-create-home --shell /usr/sbin/nologin nebula
 
 COPY pyproject.toml README.md ./
+COPY alembic.ini ./
+COPY alembic ./alembic
 COPY src ./src
 RUN python -m pip install --no-cache-dir .
 

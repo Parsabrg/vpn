@@ -20,7 +20,7 @@ Deliverables:
 
 Exit criteria: documentation is reviewed and merged; GitHub access is available.
 
-## Phase 1.1 — monorepo and CI scaffold (current)
+## Phase 1.1 — monorepo and CI scaffold
 
 Create the FastAPI, VPN agent, Next.js, and Flutter workspaces; pinned tool versions;
 development Compose; local Mailpit; formatting/linting/test commands; and GitHub
@@ -34,7 +34,7 @@ Checks:
 - Compose configuration validation and container health smoke test
 - Secret scan and dependency audit
 
-## Phase 1.2 — database and identity foundation
+## Phase 1.2 — database and identity foundation (current)
 
 Implement SQLAlchemy 2 models, enums, indexes, foreign keys, Alembic migrations,
 PostgreSQL integration fixtures, and the interactive initial-admin seed command.

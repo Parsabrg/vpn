@@ -1,10 +1,12 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap check test compose-config compose-up compose-down compose-smoke
+.PHONY: help bootstrap check test db-upgrade db-check compose-config compose-up compose-down compose-smoke
 
 help:
 	@echo "bootstrap      Install workspace dependencies"
 	@echo "check          Run all static checks and tests"
+	@echo "db-upgrade     Upgrade PostgreSQL to the checked-in migration head"
+	@echo "db-check       Verify model metadata matches the migration head"
 	@echo "compose-config Validate the development Compose model"
 	@echo "compose-up     Build and start the local stack"
 	@echo "compose-down   Stop the local stack"
@@ -29,6 +31,12 @@ test:
 	python -m pytest services/api/tests services/vpn-agent/tests
 	npm --prefix apps/admin test
 	cd apps/mobile && flutter test
+
+db-upgrade:
+	cd services/api && python -m alembic upgrade head
+
+db-check:
+	cd services/api && python -m alembic check
 
 compose-config:
 	docker compose config --quiet

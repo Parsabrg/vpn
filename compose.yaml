@@ -5,10 +5,15 @@ services:
     image: postgres:17.10
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nebula}
-      POSTGRES_USER: ${POSTGRES_USER:-nebula}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-replace-local-only}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:-replace-local-superuser-only}
+      NEBULA_DB_APP_USER: ${NEBULA_DB_APP_USER:-nebula_app}
+      NEBULA_DB_APP_PASSWORD: ${NEBULA_DB_APP_PASSWORD:-replace-local-app-only}
+      NEBULA_DB_MIGRATOR_USER: ${NEBULA_DB_MIGRATOR_USER:-nebula_migrator}
+      NEBULA_DB_MIGRATOR_PASSWORD: ${NEBULA_DB_MIGRATOR_PASSWORD:-replace-local-migrator-only}
     volumes:
       - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/001-create-roles.sh:/docker-entrypoint-initdb.d/001-create-roles.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
@@ -17,6 +22,24 @@ services:
       start_period: 5s
     networks: [backend]
     restart: unless-stopped
+
+  migrate:
+    build:
+      context: ./services/api
+    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_MIGRATOR_USER:-nebula_migrator}:${NEBULA_DB_MIGRATOR_PASSWORD:-replace-local-migrator-only}@postgres:5432/${POSTGRES_DB:-nebula}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [backend]
+    restart: "no"
 
   redis:
     image: redis:8.8.0
@@ -89,7 +112,7 @@ services:
       NEBULA_LOG_LEVEL: INFO
       NEBULA_API_PUBLIC_URL: http://localhost:${API_PORT:-8000}
       NEBULA_ALLOWED_ORIGINS: http://localhost:${ADMIN_PORT:-3000}
-      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-nebula}:${POSTGRES_PASSWORD:-replace-local-only}@postgres:5432/${POSTGRES_DB:-nebula}
+      NEBULA_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_APP_USER:-nebula_app}:${NEBULA_DB_APP_PASSWORD:-replace-local-app-only}@postgres:5432/${POSTGRES_DB:-nebula}
       REDIS_URL: redis://redis:6379/0
       NEBULA_VPN_AGENT_URL: http://vpn-agent:9443
       NEBULA_SMTP_HOST: mailpit
@@ -105,6 +128,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       mailpit:
