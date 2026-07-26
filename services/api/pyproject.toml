@@ -13,7 +13,7 @@ dependencies = [
   "argon2-cffi==25.1.0",
   "cryptography==49.0.0",
   "email-validator==2.3.0",
-  "fastapi==0.139.2",
+  "fastapi==0.140.0",
   "pydantic-settings==2.14.2",
   "psycopg[binary]==3.3.4",
   "PyJWT[crypto]==2.13.0",
@@ -27,13 +27,13 @@ nebula-api = "nebula_api.cli:main"
 
 [project.optional-dependencies]
 dev = [
-  "hypothesis==6.157.1",
-  "httpx2==2.7.0",
+  "hypothesis==6.161.5",
+  "httpx2==2.9.1",
   "mypy==2.3.0",
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.15.22",
+  "ruff==0.16.0",
 ]
 
 [tool.hatch.build.targets.wheel]
