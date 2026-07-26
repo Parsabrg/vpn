@@ -33,6 +33,7 @@ def test_migration_history_is_linear_and_matches_runtime_head() -> None:
 
     assert scripts.get_heads() == [SCHEMA_HEAD]
     assert [revision.revision for revision in scripts.walk_revisions()] == [
+        "20260720_0004",
         "20260720_0003",
         "20260720_0002",
         "20260720_0001",
@@ -77,6 +78,25 @@ def test_operations_revision_and_bootstraps_enforce_runtime_role_boundaries() ->
     assert "FOR INSERT TO nebula_app_runtime" in operations
     assert "REVOKE UPDATE, DELETE ON TABLE audit_logs" in operations
     assert "REVOKE INSERT, UPDATE, DELETE ON TABLE alembic_version" in operations
+
+
+def test_auth_security_revision_preserves_lineage_and_audit_boundaries() -> None:
+    auth_security = (VERSIONS / "20260720_0004_auth_security.py").read_text(encoding="utf-8")
+
+    assert "fk_refresh_tokens_replacement_same_session_refresh_tokens" in auth_security
+    assert '["replaced_by_id", "session_id"]' in auth_security
+    assert "postgreSQL_where=sa.text(\"state = 'active'\")" not in auth_security
+    assert "postgresql_where=sa.text(\"state = 'active'\")" in auth_security
+    assert "uq_user_sessions_active_device_id" in auth_security
+    assert "uq_refresh_tokens_active_session_id" in auth_security
+    assert "admin_totp_credentials" in auth_security
+    assert "admin_mfa_recovery_codes" in auth_security
+    assert "last_accepted_timestep" in auth_security
+    assert "refresh_reuse_detected" in auth_security
+    assert "anonymous" in auth_security
+    assert "REVOKE UPDATE, DELETE ON TABLE audit_logs" in auth_security
+    assert "DROP POLICY" not in auth_security
+    assert "DISABLE ROW LEVEL SECURITY" not in auth_security
 
 
 def test_runtime_database_url_uses_the_validated_nebula_setting_name() -> None:

@@ -34,7 +34,7 @@ Checks:
 - Compose configuration validation and container health smoke test
 - Secret scan and dependency audit
 
-## Phase 1.2 — database and identity foundation (current)
+## Phase 1.2 — database and identity foundation (complete)
 
 Implement SQLAlchemy 2 models, enums, indexes, foreign keys, Alembic migrations,
 PostgreSQL integration fixtures, and the interactive initial-admin seed command.
@@ -45,7 +45,7 @@ in the architecture.
 Checks include forward migration from empty DB, downgrade/upgrade where safe,
 constraint tests, normalized identity uniqueness, and migration smoke tests.
 
-## Phase 1.3 — authentication and administrator security
+## Phase 1.3 — authentication and administrator security (current)
 
 Implement Argon2id, user access/refresh flow, token-family rotation and reuse
 detection, device sessions, logout/revocation, administrator password + TOTP MFA,

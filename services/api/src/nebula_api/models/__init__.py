@@ -6,7 +6,15 @@ from nebula_api.models.approval import (
     PasswordResetToken,
     UserActivation,
 )
-from nebula_api.models.identity import AdminUser, Device, RefreshToken, User, UserSession
+from nebula_api.models.identity import (
+    AdminMfaRecoveryCode,
+    AdminTotpCredential,
+    AdminUser,
+    Device,
+    RefreshToken,
+    User,
+    UserSession,
+)
 from nebula_api.models.operations import (
     AgentOperation,
     AuditLog,
@@ -33,6 +41,8 @@ from nebula_api.models.topology import (
 __all__ = [
     "AccountRequest",
     "AccountRequestEvent",
+    "AdminMfaRecoveryCode",
+    "AdminTotpCredential",
     "AdminUser",
     "AgentOperation",
     "AuditLog",

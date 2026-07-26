@@ -42,6 +42,13 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:8.8.0
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     env:
       POSTGRES_DB: nebula
       POSTGRES_ADMIN_URL: postgresql://postgres:ci-postgres-only@postgres:5432/nebula
@@ -51,6 +58,7 @@ jobs:
       NEBULA_DB_MIGRATOR_PASSWORD: ci-migrator-only
       NEBULA_DATABASE_URL: postgresql+psycopg://nebula_app:ci-app-only@postgres:5432/nebula
       MIGRATION_DATABASE_URL: postgresql+psycopg://nebula_migrator:ci-migrator-only@postgres:5432/nebula
+      NEBULA_REDIS_URL: redis://redis:6379/0
     steps:
       # actions/checkout v7.0.0
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0

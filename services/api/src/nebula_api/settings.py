@@ -1,6 +1,7 @@
 """Validated runtime configuration for the public API."""
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlsplit
 
@@ -27,6 +28,7 @@ class Settings(BaseSettings):
     env: Environment = "development"
     log_level: LogLevel = "INFO"
     api_public_url: str = "http://localhost:8000"
+    admin_public_url: str = "http://localhost:3000"
     allowed_origins: str = "http://localhost:3000"
     max_request_bytes: int = Field(default=1_048_576, ge=1_024, le=10_485_760)
     database_url: SecretStr = Field(
@@ -39,8 +41,36 @@ class Settings(BaseSettings):
     database_connect_timeout_seconds: int = Field(default=3, ge=1, le=30)
     database_statement_timeout_ms: int = Field(default=5_000, ge=100, le=30_000)
     readiness_timeout_seconds: float = Field(default=2.0, ge=0.1, le=10.0)
+    redis_url: SecretStr = Field(default=SecretStr("redis://localhost:6379/0"), repr=False)
 
-    @field_validator("api_public_url")
+    jwt_issuer: str = Field(default="nebula-api", min_length=1, max_length=128)
+    jwt_audience: str = Field(default="nebula-user", min_length=1, max_length=128)
+    jwt_key_id: str = Field(default="v1", pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,31}$")
+    jwt_private_key_file: Path | None = None
+    jwt_public_key_file: Path | None = None
+    token_pepper_file: Path | None = None
+    token_key_version: int = Field(default=1, ge=1, le=2_147_483_647)
+    mfa_encryption_key_file: Path | None = None
+    mfa_key_version: int = Field(default=1, ge=1, le=2_147_483_647)
+
+    access_token_ttl_seconds: int = Field(default=900, ge=60, le=3_600)
+    refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
+    password_reset_ttl_minutes: int = Field(default=30, ge=5, le=120)
+    admin_session_ttl_minutes: int = Field(default=30, ge=5, le=480)
+    admin_session_absolute_ttl_hours: int = Field(default=8, ge=1, le=24)
+    admin_preauth_ttl_minutes: int = Field(default=5, ge=1, le=15)
+    admin_step_up_ttl_minutes: int = Field(default=5, ge=1, le=15)
+    totp_allowed_skew_steps: int = Field(default=1, ge=0, le=1)
+
+    auth_rate_window_seconds: int = Field(default=900, ge=60, le=3_600)
+    user_login_rate_limit: int = Field(default=10, ge=1, le=100)
+    admin_login_rate_limit: int = Field(default=5, ge=1, le=50)
+    admin_mfa_rate_limit: int = Field(default=5, ge=1, le=50)
+    password_reset_rate_limit: int = Field(default=5, ge=1, le=50)
+    admin_lockout_threshold: int = Field(default=5, ge=2, le=20)
+    admin_lockout_seconds: int = Field(default=900, ge=60, le=86_400)
+
+    @field_validator("api_public_url", "admin_public_url")
     @classmethod
     def validate_public_url(cls, value: str) -> str:
         parsed = urlsplit(value)
@@ -49,6 +79,23 @@ class Settings(BaseSettings):
         if parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise ValueError("must not contain credentials, query parameters, or fragments")
         return value.rstrip("/")
+
+    @field_validator("redis_url")
+    @classmethod
+    def validate_redis_url(cls, value: SecretStr) -> SecretStr:
+        parsed = urlsplit(value.get_secret_value())
+        if parsed.scheme not in {"redis", "rediss"} or not parsed.hostname:
+            raise ValueError("must be an absolute Redis URL")
+        if parsed.fragment:
+            raise ValueError("must not contain a fragment")
+        return value
+
+    @field_validator("jwt_issuer", "jwt_audience")
+    @classmethod
+    def validate_jwt_context(cls, value: str) -> str:
+        if value.strip() != value:
+            raise ValueError("must not contain leading or trailing whitespace")
+        return value
 
     @field_validator("allowed_origins")
     @classmethod
@@ -82,10 +129,12 @@ class Settings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def reject_unsafe_production_defaults(self) -> Self:
+    def validate_runtime_boundaries(self) -> Self:
+        if self.admin_session_ttl_minutes > self.admin_session_absolute_ttl_hours * 60:
+            raise ValueError("administrator idle session lifetime cannot exceed absolute lifetime")
         if self.env != "production":
             return self
-        urls = [self.api_public_url, *self.allowed_origins.split(",")]
+        urls = [self.api_public_url, self.admin_public_url, *self.allowed_origins.split(",")]
         for url in urls:
             parsed = urlsplit(url)
             if parsed.scheme != "https" or parsed.hostname in {"localhost", "127.0.0.1", "::1"}:
@@ -96,7 +145,47 @@ class Settings(BaseSettings):
             self.migration_database_url.get_secret_value() == self.database_url.get_secret_value()
         ):
             raise ValueError("production application and migration database roles must differ")
+        required_secret_files = {
+            "jwt_private_key_file": self.jwt_private_key_file,
+            "jwt_public_key_file": self.jwt_public_key_file,
+            "token_pepper_file": self.token_pepper_file,
+            "mfa_encryption_key_file": self.mfa_encryption_key_file,
+        }
+        missing = [name for name, path in required_secret_files.items() if path is None]
+        if missing:
+            raise ValueError("production authentication secret files are required")
+        if any(
+            path is not None and not path.is_absolute() for path in required_secret_files.values()
+        ):
+            raise ValueError("production authentication secret file paths must be absolute")
+        parsed_redis = urlsplit(self.redis_url.get_secret_value())
+        if not parsed_redis.password:
+            raise ValueError("production Redis must use authentication")
         return self
+
+    @property
+    def allowed_origin_values(self) -> tuple[str, ...]:
+        """Return the exact CORS/origin allowlist without reparsing at call sites."""
+
+        return tuple(self.allowed_origins.split(","))
+
+    @property
+    def admin_cookie_name(self) -> str:
+        """Use the host-only cookie prefix whenever HTTPS is mandatory."""
+
+        return "__Host-nebula_admin" if self.env in {"staging", "production"} else "nebula_admin"
+
+    @property
+    def admin_cookie_secure(self) -> bool:
+        """Permit local HTTP development while requiring secure deployed cookies."""
+
+        return self.env in {"staging", "production"}
+
+    @property
+    def admin_csrf_cookie_name(self) -> str:
+        """Name the readable, host-only CSRF cookie separately from the session."""
+
+        return "__Host-nebula_csrf" if self.admin_cookie_secure else "nebula_csrf"
 
 
 @lru_cache

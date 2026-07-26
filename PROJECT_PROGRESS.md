@@ -1,11 +1,11 @@
 # Project progress
 
-Last updated: 2026-07-20
+Last updated: 2026-07-26
 
 ## Current phase
 
-Phase 1.2 — database and identity foundation, implemented for review. Phase 0 was
-squash-merged in pull request #1 and Phase 1.1 in pull request #2.
+Phase 1.3 — authentication and administrator security, implemented for review.
+Phase 1.1 was squash-merged in pull request #2 and Phase 1.2 in pull request #5.
 
 ## Completed
 
@@ -26,9 +26,9 @@ squash-merged in pull request #1 and Phase 1.1 in pull request #2.
   dependency review, secret scanning, and container vulnerability scanning.
 - Added exact tool/direct-dependency pins, an npm lockfile, Dependabot, root task
   commands, and a development guide.
-- Added 25 explicit PostgreSQL tables for identity, approval, tokens, reviewed
+- Added 27 explicit PostgreSQL tables for identity, approval, tokens, reviewed
   protocol topology, provisioning intent, audit, delivery, health, and settings.
-- Added three linear, immutable Alembic revisions with an exact runtime schema-head
+- Added four linear, immutable Alembic revisions with an exact runtime schema-head
   check; application startup never runs migrations.
 - Added separate configurable login roles for application DML and migrations. A
   fixed inherited runtime group cannot perform DDL, mutate the Alembic version, or
@@ -44,19 +44,39 @@ squash-merged in pull request #1 and Phase 1.1 in pull request #2.
 - Added a one-shot Compose migration service and PostgreSQL CI coverage for an
   empty-database upgrade, metadata drift, application-role DDL denial, audit
   append-only enforcement, and migration-version protection.
+- Added separate user bearer-token and administrator cookie/MFA realms. User login
+  issues strict Ed25519 access JWTs and rotating opaque refresh tokens; every
+  protected request reloads the PostgreSQL user, device, and session for immediate
+  revocation.
+- Added one-active-session-per-device and one-active-refresh-per-session database
+  invariants, fixed refresh-family expiry, atomic rotation, reuse detection, and
+  family revocation under row locks.
+- Added neutral password-reset request/confirmation, keyed single-use token digests,
+  rate limits before expensive password hashing, and revocation of all existing
+  user sessions after password replacement. Reliable email delivery remains the
+  Phase 1.4 boundary.
+- Added administrator password challenges, first-time TOTP enrollment, encrypted
+  TOTP seeds, durable replay counters, single-use recovery codes, short-lived Redis
+  sessions, fresh step-up sessions, exact-origin checks, rotating CSRF tokens,
+  lockout, and dual keyed-account/network rate limits.
+- Added fail-closed Redis Lua transitions, production key-file validation, generic
+  public errors, no-store/referrer controls, redacted validation responses, and an
+  expanded append-only authentication audit vocabulary.
 
 ## Validation recorded locally
 
-- API: Ruff, format, strict mypy across 32 source files, 100 pytest tests, and 98.09%
-  branch coverage pass; one live-PostgreSQL permission test is skipped locally.
+- API: Ruff, format, and strict mypy across 58 source/test files pass. The suite
+  collects 303 tests and remains above the 95% branch-coverage gate; two live
+  PostgreSQL tests and the real-Redis atomicity test skip when those services are
+  not configured locally and run in CI.
 - VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
-- Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, production build, and
-  production dependency audit pass.
+- Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, and the production
+  build pass; the image vulnerability scan remains a required CI gate.
 - Compose configuration renders successfully.
-- All three Alembic revisions render successfully as offline PostgreSQL SQL, and
-  static tests account for every one of the 25 model tables in both directions.
-- The installed Python dependency graph reports no known vulnerabilities; the two
-  local editable workspace packages are correctly not found on PyPI.
+- All four Alembic revisions render successfully as offline PostgreSQL SQL, and
+  static tests account for every one of the 27 model tables in both directions.
+- `pip check` reports no broken Python requirements; the current vulnerability
+  audit remains a required CI gate.
 - GitHub Action references use full commit SHAs.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
@@ -74,19 +94,23 @@ verified claims.
 
 ## Next milestone
 
-- Review and merge the Phase 1.2 database foundation after all CI checks pass.
+- Review and merge Phase 1.3 authentication/security after all CI checks pass.
 - Generate Android and Windows host projects after support versions are confirmed.
-- Begin Phase 1.3 authentication and administrator security in a separate pull
-  request.
+- Begin Phase 1.4 account request, approval, and reliable email delivery in a
+  separate pull request.
 
 ## Known limitations
 
-- The schema exists, but no authentication endpoint, account approval behavior,
-  email delivery, VPN provisioning, WireGuard/Xray runtime integration, native
-  tunnel integration, backup, or production deployment exists yet.
-- `/readyz` proves only API process state, database connectivity, and schema version;
-  it is not proof of Redis, email, VPN-agent, or tunnel readiness.
+- Authentication endpoints exist, but no password-reset delivery adapter, account
+  approval behavior, reliable email worker, administrator UI integration, VPN
+  provisioning, WireGuard/Xray runtime integration, native tunnel integration,
+  backup, or production deployment exists yet.
+- `/readyz` proves API process state, database connectivity, exact schema version,
+  and Redis connectivity; it is not proof of email, VPN-agent, or tunnel readiness.
 - Python and Flutter direct dependencies are pinned, but their complete transitive
   graphs are not yet committed as platform-independent lock data.
+- Authentication records carry key versions, but the current runtime file contract
+  loads one active JWT/pepper/MFA version; non-disruptive multi-key rotation tooling
+  remains production-operations work.
 - Kill switch, DNS/IPv6 leak protection, and target-platform behavior remain
   unimplemented and unverified.
