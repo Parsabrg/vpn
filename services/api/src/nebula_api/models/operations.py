@@ -51,10 +51,25 @@ RECONCILIATION_OUTCOMES = (
     "repair_failed",
     "ambiguous",
 )
-AUDIT_ACTOR_KINDS = ("user", "admin", "system", "worker", "agent", "bootstrap")
+AUDIT_ACTOR_KINDS = (
+    "user",
+    "admin",
+    "anonymous",
+    "system",
+    "worker",
+    "agent",
+    "bootstrap",
+)
 AUDIT_TARGET_KINDS = (
     "user",
     "admin",
+    "auth_attempt",
+    "user_session",
+    "admin_session",
+    "refresh_token",
+    "password_reset_token",
+    "admin_totp_credential",
+    "admin_recovery_code",
     "device",
     "account_request",
     "protocol_profile",
@@ -84,6 +99,20 @@ AUDIT_EVENT_CODES = (
     "operation_changed",
     "setting_changed",
     "email_delivery_changed",
+    "user_authenticated",
+    "admin_authenticated",
+    "refresh_rotated",
+    "refresh_reuse_detected",
+    "session_revoked",
+    "password_changed",
+    "password_reset_requested",
+    "password_reset_consumed",
+    "admin_mfa_changed",
+    "admin_mfa_challenged",
+    "admin_recovery_code_used",
+    "auth_lockout_changed",
+    "auth_rate_limited",
+    "csrf_validation",
 )
 AUDIT_OUTCOMES = ("succeeded", "failed", "denied")
 EMAIL_TEMPLATE_CODES = (
@@ -286,7 +315,8 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
             name="outcome_vocabulary",
         ),
         CheckConstraint(
-            "(actor_kind IN ('system', 'worker', 'bootstrap') AND actor_id IS NULL) OR "
+            "(actor_kind IN ('anonymous', 'system', 'worker', 'bootstrap') AND "
+            "actor_id IS NULL) OR "
             "(actor_kind IN ('user', 'admin', 'agent') AND actor_id IS NOT NULL)",
             name="actor_identity_shape",
         ),
@@ -296,6 +326,7 @@ class AuditLog(UUIDPrimaryKeyMixin, Base):
         ),
         Index("ix_audit_logs_actor_recorded", "actor_kind", "actor_id", "recorded_at"),
         Index("ix_audit_logs_target_recorded", "target_kind", "target_id", "recorded_at"),
+        Index("ix_audit_logs_event_recorded", "event_code", "recorded_at"),
         Index("ix_audit_logs_request_id", "request_id"),
     )
 

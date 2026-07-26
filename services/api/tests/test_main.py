@@ -1,5 +1,4 @@
 from fastapi.testclient import TestClient
-from starlette.routing import Route
 
 from nebula_api.main import create_app
 from nebula_api.settings import Settings
@@ -60,8 +59,22 @@ def test_readiness_is_generic_when_database_is_unavailable() -> None:
     }
 
 
-def test_phase_1_2_exposes_only_probe_routes() -> None:
-    app = create_app(Settings(env="test"), readiness_check=ready_database)
-    application_paths = {route.path for route in app.routes if isinstance(route, Route)}
+def test_phase_1_3_registers_probes_and_separate_auth_realms() -> None:
+    with TestClient(create_app(Settings(env="test"), readiness_check=ready_database)) as client:
+        user = client.post(
+            "/v1/auth/login",
+            json={
+                "identifier": "user@example.com",
+                "password": "password-canary",
+                "device_name": "Phone",
+                "platform": "android",
+                "client_version": "1.0",
+            },
+        )
+        admin = client.post(
+            "/v1/admin/auth/login",
+            headers={"Origin": "http://localhost:3000"},
+            json={"identifier": "owner@example.com", "password": "password-canary"},
+        )
 
-    assert application_paths == {"/healthz", "/readyz"}
+    assert user.status_code == admin.status_code == 503

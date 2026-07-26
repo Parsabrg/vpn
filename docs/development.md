@@ -1,10 +1,12 @@
 # Development guide
 
-The Phase 1.2 workspaces include the runnable Phase 1.1 service shells plus the
-control-plane persistence foundation. The API has PostgreSQL models, migrations,
-database-backed readiness, and an initial-administrator seed command. It still has
-no authentication endpoints, approval workflow, email delivery, VPN provisioning,
-WireGuard/Xray runtime integration, or production deployment.
+The Phase 1.3 workspaces include the runnable service shells, control-plane
+persistence foundation, and user/administrator authentication security. The API
+has PostgreSQL models and migrations, Redis-backed authentication state,
+database-backed readiness, an initial-administrator seed command, and versioned
+authentication endpoints. Approval workflow, production email delivery, VPN
+provisioning, WireGuard/Xray runtime integration, and production deployment remain
+future phases.
 
 ## Pinned toolchain
 

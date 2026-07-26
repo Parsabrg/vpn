@@ -5,6 +5,7 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -14,6 +15,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy import (
     Enum as SQLAlchemyEnum,
@@ -121,6 +123,150 @@ class AdminUser(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         return f"<AdminUser id={self.id!s} role={self.role.value} state={self.state.value}>"
 
 
+class AdminTotpCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Versioned encrypted TOTP enrollment with replay-resistant timestep state."""
+
+    __tablename__ = "admin_totp_credentials"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('pending', 'active', 'revoked')",
+            name="state_vocabulary",
+        ),
+        CheckConstraint(
+            "(state = 'pending' AND confirmed_at IS NULL AND revoked_at IS NULL) OR "
+            "(state = 'active' AND confirmed_at IS NOT NULL AND revoked_at IS NULL) OR "
+            "(state = 'revoked' AND revoked_at IS NOT NULL)",
+            name="state_timestamp_shape",
+        ),
+        CheckConstraint(
+            "(state IN ('pending', 'active') AND secret_ciphertext IS NOT NULL AND "
+            "secret_nonce IS NOT NULL AND key_version IS NOT NULL) OR "
+            "(state = 'revoked' AND secret_ciphertext IS NULL AND secret_nonce IS NULL AND "
+            "key_version IS NULL)",
+            name="secret_material_shape",
+        ),
+        CheckConstraint(
+            "secret_nonce IS NULL OR octet_length(secret_nonce) = 12",
+            name="nonce_12_bytes",
+        ),
+        CheckConstraint(
+            "secret_ciphertext IS NULL OR octet_length(secret_ciphertext) BETWEEN 17 AND 512",
+            name="ciphertext_length",
+        ),
+        CheckConstraint(
+            "key_version IS NULL OR key_version > 0",
+            name="positive_key_version",
+        ),
+        CheckConstraint(
+            "last_accepted_timestep IS NULL OR last_accepted_timestep >= 0",
+            name="nonnegative_last_accepted_timestep",
+        ),
+        CheckConstraint(
+            "state != 'pending' OR last_accepted_timestep IS NULL",
+            name="pending_has_no_accepted_timestep",
+        ),
+        CheckConstraint(
+            "confirmed_at IS NULL OR confirmed_at >= created_at",
+            name="confirmation_after_creation",
+        ),
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="revocation_after_creation",
+        ),
+        Index(
+            "uq_admin_totp_credentials_active_admin_user_id",
+            "admin_user_id",
+            unique=True,
+            postgresql_where=text("state = 'active'"),
+        ),
+        Index(
+            "uq_admin_totp_credentials_pending_admin_user_id",
+            "admin_user_id",
+            unique=True,
+            postgresql_where=text("state = 'pending'"),
+        ),
+        Index(
+            "ix_admin_totp_credentials_admin_user_id_state",
+            "admin_user_id",
+            "state",
+        ),
+    )
+
+    admin_user_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending", server_default="pending"
+    )
+    secret_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    secret_nonce: Mapped[bytes | None] = mapped_column(LargeBinary)
+    key_version: Mapped[int | None] = mapped_column(Integer)
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_accepted_timestep: Mapped[int | None] = mapped_column(BigInteger)
+
+    def __repr__(self) -> str:
+        return (
+            f"<AdminTotpCredential id={self.id!s} "
+            f"admin_user_id={self.admin_user_id!s} state={self.state}>"
+        )
+
+
+class AdminMfaRecoveryCode(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Single-use keyed recovery-code digest bound to one TOTP enrollment."""
+
+    __tablename__ = "admin_mfa_recovery_codes"
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('active', 'consumed', 'revoked')",
+            name="state_vocabulary",
+        ),
+        CheckConstraint(
+            "(state = 'active' AND consumed_at IS NULL AND revoked_at IS NULL) OR "
+            "(state = 'consumed' AND consumed_at IS NOT NULL AND revoked_at IS NULL) OR "
+            "(state = 'revoked' AND consumed_at IS NULL AND revoked_at IS NOT NULL)",
+            name="state_timestamp_shape",
+        ),
+        CheckConstraint("octet_length(code_digest) = 32", name="code_digest_32_bytes"),
+        CheckConstraint("key_version > 0", name="positive_key_version"),
+        CheckConstraint(
+            "consumed_at IS NULL OR consumed_at >= created_at",
+            name="consumption_after_creation",
+        ),
+        CheckConstraint(
+            "revoked_at IS NULL OR revoked_at >= created_at",
+            name="revocation_after_creation",
+        ),
+        UniqueConstraint("code_digest", name="uq_admin_mfa_recovery_codes_code_digest"),
+        Index(
+            "ix_admin_mfa_recovery_codes_credential_state",
+            "admin_totp_credential_id",
+            "state",
+        ),
+    )
+
+    admin_totp_credential_id: Mapped[UUID] = mapped_column(
+        PostgreSQLUUID(as_uuid=True),
+        ForeignKey("admin_totp_credentials.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    code_digest: Mapped[bytes] = mapped_column(LargeBinary(32), nullable=False)
+    key_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="active", server_default="active"
+    )
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    def __repr__(self) -> str:
+        return (
+            f"<AdminMfaRecoveryCode id={self.id!s} "
+            f"credential_id={self.admin_totp_credential_id!s} state={self.state}>"
+        )
+
+
 class Device(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     """A registered application installation; protocol credentials live elsewhere."""
 
@@ -174,6 +320,12 @@ class UserSession(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index("ix_user_sessions_user_id_state", "user_id", "state"),
         Index("ix_user_sessions_expires_at", "expires_at"),
+        Index(
+            "uq_user_sessions_active_device_id",
+            "device_id",
+            unique=True,
+            postgresql_where=text("state = 'active'"),
+        ),
     )
 
     user_id: Mapped[UUID] = mapped_column(PostgreSQLUUID(as_uuid=True), nullable=False)
@@ -211,8 +363,31 @@ class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "(state = 'revoked') = (revoked_at IS NOT NULL)",
             name="revoked_timestamp_matches_state",
         ),
+        CheckConstraint(
+            "(state = 'consumed') = (replaced_by_id IS NOT NULL)",
+            name="consumed_replacement_matches_state",
+        ),
+        CheckConstraint(
+            "replaced_by_id IS NULL OR replaced_by_id != id",
+            name="not_self_replaced",
+        ),
+        ForeignKeyConstraint(
+            ["replaced_by_id", "session_id"],
+            ["refresh_tokens.id", "refresh_tokens.session_id"],
+            name="fk_refresh_tokens_replacement_same_session_refresh_tokens",
+            ondelete="RESTRICT",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        UniqueConstraint("id", "session_id", name="uq_refresh_tokens_id_session_id"),
         Index("ix_refresh_tokens_session_id_state", "session_id", "state"),
         Index("ix_refresh_tokens_expires_at", "expires_at"),
+        Index(
+            "uq_refresh_tokens_active_session_id",
+            "session_id",
+            unique=True,
+            postgresql_where=text("state = 'active'"),
+        ),
     )
 
     session_id: Mapped[UUID] = mapped_column(
@@ -233,7 +408,6 @@ class RefreshToken(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     replaced_by_id: Mapped[UUID | None] = mapped_column(
         PostgreSQLUUID(as_uuid=True),
-        ForeignKey("refresh_tokens.id", ondelete="RESTRICT"),
         unique=True,
     )
 

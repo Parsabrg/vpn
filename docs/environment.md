@@ -48,25 +48,63 @@ it is never accepted as an environment variable or command-line argument.
 | `NEBULA_API_PUBLIC_URL`    | local URL     | Used for API links and issuer validation       |
 | `NEBULA_ADMIN_PUBLIC_URL`  | local URL     | Activation/review destinations                 |
 | `NEBULA_ALLOWED_ORIGINS`   | local admin   | Exact origins only; never `*` with credentials |
-| `NEBULA_MAX_REQUEST_BYTES` | 1 MiB         | Enforced at Nginx and API                      |
+| `NEBULA_MAX_REQUEST_BYTES` | 1 MiB         | Enforced by API; match at the edge proxy       |
+
+## Authentication key material
+
+| Variable                         | Format                      | Purpose                         |
+| -------------------------------- | --------------------------- | ------------------------------- |
+| `NEBULA_JWT_PRIVATE_KEY_FILE`    | Ed25519 private key in PEM  | Sign user access tokens         |
+| `NEBULA_JWT_PUBLIC_KEY_FILE`     | Matching Ed25519 public PEM | Verify user access tokens       |
+| `NEBULA_TOKEN_PEPPER_FILE`       | Exactly 32 raw random bytes | Key opaque-token digests        |
+| `NEBULA_MFA_ENCRYPTION_KEY_FILE` | Exactly 32 raw random bytes | Encrypt administrator TOTP seed |
+| `NEBULA_JWT_KEY_ID`              | `v1`                        | JWT verification-key version    |
+| `NEBULA_TOKEN_KEY_VERSION`       | `1`                         | Opaque-token pepper version     |
+| `NEBULA_MFA_KEY_VERSION`         | `1`                         | MFA encryption-key version      |
+
+All four file paths are required together outside development and tests; production
+requires absolute paths. Development and tests may omit all four and use process-local
+ephemeral keys. That fallback is single-process only: restarting invalidates existing
+tokens and leaves MFA ciphertext created by the previous process unreadable.
 
 ## Authentication lifetime defaults
 
-| Variable                            | Default | Security intent                    |
-| ----------------------------------- | ------: | ---------------------------------- |
-| `NEBULA_ACCESS_TOKEN_TTL_SECONDS`   |     900 | Limit stolen access-token lifetime |
-| `NEBULA_REFRESH_TOKEN_TTL_DAYS`     |      30 | Bounded device session             |
-| `NEBULA_ACTIVATION_TOKEN_TTL_HOURS` |      24 | Approval activation window         |
-| `NEBULA_PASSWORD_RESET_TTL_MINUTES` |      30 | Short recovery exposure            |
-| `NEBULA_ADMIN_SESSION_TTL_MINUTES`  |      30 | Short privileged inactivity window |
+| Variable                                  | Default | Security intent                    |
+| ----------------------------------------- | ------: | ---------------------------------- |
+| `NEBULA_ACCESS_TOKEN_TTL_SECONDS`         |     900 | Limit stolen access-token lifetime |
+| `NEBULA_REFRESH_TOKEN_TTL_DAYS`           |      30 | Fixed device-session family        |
+| `NEBULA_ACTIVATION_TOKEN_TTL_HOURS`       |      24 | Approval activation window         |
+| `NEBULA_PASSWORD_RESET_TTL_MINUTES`       |      30 | Short recovery exposure            |
+| `NEBULA_ADMIN_SESSION_TTL_MINUTES`        |      30 | Privileged inactivity window       |
+| `NEBULA_ADMIN_SESSION_ABSOLUTE_TTL_HOURS` |       8 | Non-extendable privileged lifetime |
+| `NEBULA_ADMIN_PREAUTH_TTL_MINUTES`        |       5 | Password success grants no session |
+| `NEBULA_ADMIN_STEP_UP_TTL_MINUTES`        |       5 | Bound destructive-action elevation |
+| `NEBULA_TOTP_ALLOWED_SKEW_STEPS`          |       1 | Small clock-drift allowance        |
+
+## Authentication abuse controls
+
+| Variable                           | Default | Scope                                     |
+| ---------------------------------- | ------: | ----------------------------------------- |
+| `NEBULA_AUTH_RATE_WINDOW_SECONDS`  |     900 | Atomic Redis limiter window               |
+| `NEBULA_USER_LOGIN_RATE_LIMIT`     |      10 | Keyed user plus coarse network prefix     |
+| `NEBULA_ADMIN_LOGIN_RATE_LIMIT`    |       5 | Keyed admin plus coarse network prefix    |
+| `NEBULA_ADMIN_MFA_RATE_LIMIT`      |       5 | Challenge plus coarse network prefix      |
+| `NEBULA_PASSWORD_RESET_RATE_LIMIT` |       5 | Reset request/confirm plus network prefix |
+| `NEBULA_ADMIN_LOCKOUT_THRESHOLD`   |       5 | Password or MFA failures before lockout   |
+| `NEBULA_ADMIN_LOCKOUT_SECONDS`     |     900 | Lockout duration                          |
+
+Forwarding headers are ignored for these controls; the socket peer is reduced to a
+coarse `/24` IPv4 or `/64` IPv6 prefix. A later trusted-proxy deployment must make
+that boundary explicit before forwarded client addresses are used.
 
 ## Data services
 
 `NEBULA_DATABASE_URL` uses an application role that cannot create roles, databases,
 or schema objects. `MIGRATION_DATABASE_URL` uses a separate migration role only for
 deployment and local migration commands. The two roles must differ in production.
-`REDIS_URL` is internal-only and authenticated in production. PostgreSQL and Redis
-ports must not be published to the internet.
+`NEBULA_REDIS_URL` is internal-only and authenticated in production. PostgreSQL and
+Redis ports must not be published to the internet. Readiness requires both the exact
+PostgreSQL migration head and a successful Redis ping.
 
 Redis production policy is AOF persistence with `appendfsync everysec`. Jobs and
 sessions may be reconstructed or invalidated, while PostgreSQL remains authoritative

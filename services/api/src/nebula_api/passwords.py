@@ -1,11 +1,13 @@
 """Argon2id password hashing primitives for interactive administrator seeding."""
 
+import secrets
+
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 from argon2.low_level import Type
 
 _MINIMUM_CHARACTERS = 12
-_MAXIMUM_UTF8_BYTES = 1024
+MAXIMUM_PASSWORD_UTF8_BYTES = 1_024
 
 _PASSWORD_HASHER = PasswordHasher(
     time_cost=3,
@@ -15,6 +17,7 @@ _PASSWORD_HASHER = PasswordHasher(
     salt_len=16,
     type=Type.ID,
 )
+_DUMMY_PASSWORD_HASH = _PASSWORD_HASHER.hash(secrets.token_urlsafe(48))
 
 
 def validate_password(password: str) -> None:
@@ -22,7 +25,7 @@ def validate_password(password: str) -> None:
 
     if len(password) < _MINIMUM_CHARACTERS:
         raise ValueError(f"password must contain at least {_MINIMUM_CHARACTERS} characters")
-    if len(password.encode("utf-8")) > _MAXIMUM_UTF8_BYTES:
+    if len(password.encode("utf-8")) > MAXIMUM_PASSWORD_UTF8_BYTES:
         raise ValueError("password is too large")
 
 
@@ -40,6 +43,12 @@ def verify_password(password_hash: str, candidate: str) -> bool:
         return _PASSWORD_HASHER.verify(password_hash, candidate)
     except (InvalidHashError, VerificationError):
         return False
+
+
+def verify_password_or_dummy(password_hash: str | None, candidate: str) -> bool:
+    """Perform fixed-cost verification even when an identity has no usable hash."""
+
+    return verify_password(password_hash or _DUMMY_PASSWORD_HASH, candidate)
 
 
 def password_hash_needs_rehash(password_hash: str) -> bool:
