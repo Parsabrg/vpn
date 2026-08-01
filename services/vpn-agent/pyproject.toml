@@ -9,19 +9,19 @@ description = "Nebula VPN host agent with an allowlisted operation surface"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
-  "fastapi==0.139.2",
+  "fastapi==0.141.1",
   "pydantic-settings==2.14.2",
-  "uvicorn[standard]==0.51.0",
+  "uvicorn[standard]==0.52.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "httpx2==2.7.0",
+  "httpx2==2.9.1",
   "mypy==2.3.0",
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.15.22",
+  "ruff==0.16.0",
 ]
 
 [tool.hatch.build.targets.wheel]
