@@ -151,6 +151,37 @@ services:
     networks: [frontend, backend]
     restart: unless-stopped
 
+  worker:
+    build:
+      context: ./services/worker
+    environment:
+      NEBULA_ENV: development
+      NEBULA_LOG_LEVEL: INFO
+      NEBULA_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_APP_USER:-nebula_app}:${NEBULA_DB_APP_PASSWORD:-replace-local-app-only}@postgres:5432/${POSTGRES_DB:-nebula}
+      NEBULA_REDIS_URL: redis://redis:6379/0
+      NEBULA_EMAIL_PROVIDER: smtp
+      NEBULA_EMAIL_FROM: "Nebula VPN <no-reply@example.com>"
+      NEBULA_SMTP_HOST: mailpit
+      NEBULA_SMTP_PORT: "1025"
+      NEBULA_SMTP_STARTTLS: "false"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    networks: [backend]
+    restart: unless-stopped
+
   admin:
     build:
       context: ./apps/admin

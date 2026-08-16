@@ -1,12 +1,15 @@
 # Development guide
 
-The Phase 1.3 workspaces include the runnable service shells, control-plane
-persistence foundation, and user/administrator authentication security. The API
-has PostgreSQL models and migrations, Redis-backed authentication state,
-database-backed readiness, an initial-administrator seed command, and versioned
-authentication endpoints. Approval workflow, production email delivery, VPN
-provisioning, WireGuard/Xray runtime integration, and production deployment remain
-future phases.
+The Phase 1.4 workspaces include the runnable service shells, control-plane
+persistence foundation, user/administrator authentication security, and the
+account request/approval/activation workflow. The API has PostgreSQL models and
+migrations, Redis-backed authentication state, database-backed readiness, an
+initial-administrator seed command, versioned authentication endpoints, and
+neutral account-request submission plus admin review routes. A separate `worker`
+process leases the `email_deliveries` outbox and sends activation, password-reset,
+and review-notification email through SMTP (Mailpit locally) or Resend. VPN
+provisioning, WireGuard/Xray runtime integration, administrator UI integration, and
+production deployment remain future phases.
 
 ## Pinned toolchain
 
@@ -58,9 +61,12 @@ The stack exposes only loopback development ports:
 - API probes: `http://127.0.0.1:8000/healthz` and `/readyz`
 - Mailpit: `http://127.0.0.1:8025`
 
-PostgreSQL, Redis, and the mock VPN agent stay on an internal Docker network. The
-agent container is read-only, drops every Linux capability, has no host mounts,
-and exposes only health probes. It cannot provision a tunnel or execute commands.
+PostgreSQL, Redis, the mock VPN agent, and the email worker stay on an internal
+Docker network. The agent container is read-only, drops every Linux capability, has
+no host mounts, and exposes only health probes. It cannot provision a tunnel or
+execute commands. The worker has no exposed port; submit an account request through
+the API and check Mailpit's web UI to see it deliver review, activation, and
+rejection email.
 
 Stop the stack with `make compose-down`. Local named volumes contain disposable
 development data and must never be treated as backups.

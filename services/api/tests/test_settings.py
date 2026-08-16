@@ -150,3 +150,31 @@ def test_jwt_configuration_fails_during_settings_validation(field: str, value: s
 def test_admin_idle_session_cannot_outlive_absolute_session() -> None:
     with pytest.raises(ValidationError, match="idle session lifetime"):
         Settings(admin_session_ttl_minutes=121, admin_session_absolute_ttl_hours=2)
+
+
+def test_account_request_defaults_are_bounded() -> None:
+    settings = Settings()
+
+    assert settings.activation_token_ttl_hours == 24
+    assert settings.account_request_ttl_days == 7
+    assert settings.default_device_limit == 3
+    assert settings.account_request_rate_limit == 5
+    assert settings.account_request_review_rate_limit == 20
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("activation_token_ttl_hours", 0),
+        ("activation_token_ttl_hours", 169),
+        ("account_request_ttl_days", 0),
+        ("account_request_ttl_days", 91),
+        ("default_device_limit", 0),
+        ("default_device_limit", 21),
+        ("account_request_rate_limit", 0),
+        ("account_request_review_rate_limit", 0),
+    ],
+)
+def test_account_request_settings_reject_out_of_bounds_values(field: str, value: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(**{field: value})  # type: ignore[arg-type]

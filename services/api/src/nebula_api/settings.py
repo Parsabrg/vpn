@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=3_600)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
     password_reset_ttl_minutes: int = Field(default=30, ge=5, le=120)
+    activation_token_ttl_hours: int = Field(default=24, ge=1, le=168)
+    account_request_ttl_days: int = Field(default=7, ge=1, le=90)
+    default_device_limit: int = Field(default=3, ge=1, le=20)
     admin_session_ttl_minutes: int = Field(default=30, ge=5, le=480)
     admin_session_absolute_ttl_hours: int = Field(default=8, ge=1, le=24)
     admin_preauth_ttl_minutes: int = Field(default=5, ge=1, le=15)
@@ -67,6 +70,8 @@ class Settings(BaseSettings):
     admin_login_rate_limit: int = Field(default=5, ge=1, le=50)
     admin_mfa_rate_limit: int = Field(default=5, ge=1, le=50)
     password_reset_rate_limit: int = Field(default=5, ge=1, le=50)
+    account_request_rate_limit: int = Field(default=5, ge=1, le=50)
+    account_request_review_rate_limit: int = Field(default=20, ge=1, le=100)
     admin_lockout_threshold: int = Field(default=5, ge=2, le=20)
     admin_lockout_seconds: int = Field(default=900, ge=60, le=86_400)
 

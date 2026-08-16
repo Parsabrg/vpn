@@ -1,11 +1,12 @@
 # Project progress
 
-Last updated: 2026-07-26
+Last updated: 2026-08-16
 
 ## Current phase
 
-Phase 1.3 — authentication and administrator security, implemented for review.
-Phase 1.1 was squash-merged in pull request #2 and Phase 1.2 in pull request #5.
+Phase 1.4 — account request, approval, and email workflow, implemented for review.
+Phase 1.1 was squash-merged in pull request #2, Phase 1.2 in pull request #5, and
+Phase 1.3 in pull request #10.
 
 ## Completed
 
@@ -62,27 +63,50 @@ Phase 1.1 was squash-merged in pull request #2 and Phase 1.2 in pull request #5.
 - Added fail-closed Redis Lua transitions, production key-file validation, generic
   public errors, no-store/referrer controls, redacted validation responses, and an
   expanded append-only authentication audit vocabulary.
+- Added neutral account-request submission with per-email/per-network rate limiting,
+  a partial-unique-pending-email database guard for duplicate suppression, and
+  append-only request-lifecycle events alongside the generic audit trail.
+- Added row-locked (`SELECT ... FOR UPDATE`) admin approve/reject decisions that are
+  idempotent under concurrent retries: an already-decided request returns its
+  existing outcome instead of erroring, proven with a real-PostgreSQL concurrency
+  test racing two sessions against the same request.
+- Added activation-token issuance on approval (reusing the existing opaque-token/
+  key-ring primitive under a new `activation` namespace) and single-use activation
+  confirmation that sets the user's password and flips the account to active.
+- Added a Redis-staged one-time email payload handoff (`nebula:email-outbox:v1:*`)
+  so the durable `email_deliveries` outbox row never has to store a raw secret link,
+  and a new standalone `services/worker` process that leases due deliveries with
+  `SELECT ... FOR UPDATE SKIP LOCKED`, renders the four reviewed templates, sends
+  through a stdlib-only SMTP or Resend adapter (no new runtime dependency), and
+  retries with backoff before marking a delivery failed.
+- Wired the worker into the Compose stack and CI (lint, type check, tests, Trivy
+  image scan, Dependabot) alongside the API and VPN agent.
 
 ## Validation recorded locally
 
-- API: Ruff, format, and strict mypy across 58 source/test files pass. The suite
-  collects 303 tests and remains above the 95% branch-coverage gate; two live
-  PostgreSQL tests and the real-Redis atomicity test skip when those services are
-  not configured locally and run in CI.
+- API: Ruff, format, and strict mypy across 66 source/test files pass. The suite
+  collects 346 tests and remains above the 95% branch-coverage gate (96.8%); two
+  live PostgreSQL tests, the real-Redis atomicity test, and the new account-request
+  concurrency test skip when those services are not configured locally and run in
+  CI.
+- Worker: Ruff, format, and strict mypy across 19 source/test files pass. The suite
+  collects 49 tests and remains above the 95% branch-coverage gate (96.3%).
 - VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
 - Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, and the production
   build pass; the image vulnerability scan remains a required CI gate.
-- Compose configuration renders successfully.
+- `compose.yaml` parses and the `worker` service is correctly wired to
+  postgres/redis/mailpit health gates and the one-shot `migrate` job.
 - All four Alembic revisions render successfully as offline PostgreSQL SQL, and
-  static tests account for every one of the 27 model tables in both directions.
+  static tests account for every one of the 27 model tables in both directions; no
+  new migration was needed for Phase 1.4 (the schema was already in place).
 - `pip check` reports no broken Python requirements; the current vulnerability
   audit remains a required CI gate.
 - GitHub Action references use full commit SHAs.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
-widget tests, image builds, the container health smoke test, and the real PostgreSQL
-migration/permission round trip therefore remain CI gates rather than locally
-verified claims.
+widget tests, image builds, the container health smoke test, the real PostgreSQL
+migration/permission round trip, and the new account-request concurrency test
+therefore remain CI gates rather than locally verified claims.
 
 ## External inputs pending
 
@@ -94,19 +118,24 @@ verified claims.
 
 ## Next milestone
 
-- Review and merge Phase 1.3 authentication/security after all CI checks pass.
+- Review and merge Phase 1.4 account request/approval/email workflow after all CI
+  checks pass.
 - Generate Android and Windows host projects after support versions are confirmed.
-- Begin Phase 1.4 account request, approval, and reliable email delivery in a
-  separate pull request.
+- Begin Phase 1.5 administrator dashboard (request queue, review actions, user and
+  device management) in a separate pull request.
 
 ## Known limitations
 
-- Authentication endpoints exist, but no password-reset delivery adapter, account
-  approval behavior, reliable email worker, administrator UI integration, VPN
+- Account request, approval, activation, and outbox email delivery exist, but VPN
   provisioning, WireGuard/Xray runtime integration, native tunnel integration,
-  backup, or production deployment exists yet.
+  administrator UI integration, backup, or production deployment does not exist yet.
+- The worker's SMTP/Resend adapters are exercised against Mailpit and mocked
+  transports; no production email provider credentials have been configured or
+  verified end-to-end yet.
 - `/readyz` proves API process state, database connectivity, exact schema version,
-  and Redis connectivity; it is not proof of email, VPN-agent, or tunnel readiness.
+  and Redis connectivity; it is not proof of email, VPN-agent, or tunnel readiness,
+  and the worker process has no readiness probe of its own (it is not an HTTP
+  service).
 - Python and Flutter direct dependencies are pinned, but their complete transitive
   graphs are not yet committed as platform-independent lock data.
 - Authentication records carry key versions, but the current runtime file contract
