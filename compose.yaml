@@ -188,6 +188,7 @@ services:
     environment:
       NODE_ENV: production
       NEBULA_API_INTERNAL_URL: http://api:8000
+      NEBULA_ADMIN_ORIGIN: http://localhost:${ADMIN_PORT:-3000}
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
     ports:
       - "127.0.0.1:${ADMIN_PORT:-3000}:3000"

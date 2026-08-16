@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 
-import { SiteHeader } from "@/components/site-header";
-
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,7 +7,7 @@ export const metadata: Metadata = {
     default: "Nebula Administration",
     template: "%s | Nebula Administration",
   },
-  description: "Nebula VPN administration scaffold",
+  description: "Nebula VPN administration console",
 };
 
 export default function RootLayout({
@@ -21,12 +19,9 @@ export default function RootLayout({
         <a className="skip-link" href="#main-content">
           Skip to main content
         </a>
-        <SiteHeader />
-        <main id="main-content" className="page-shell" tabIndex={-1}>
-          {children}
-        </main>
+        {children}
         <footer className="site-footer">
-          <p>Nebula Phase 1.1 scaffold — no production controls are active.</p>
+          <p>Nebula VPN administration.</p>
         </footer>
       </body>
     </html>

@@ -13,6 +13,11 @@ from nebula_api.auth.access_tokens import AccessTokenClaims, decode_access_token
 from nebula_api.auth.key_material import AuthKeyMaterial
 from nebula_api.auth.opaque_tokens import OpaqueTokenError, digest_opaque_token, issue_opaque_token
 from nebula_api.auth.redis_state import RateBucket, RedisAuthState
+from nebula_api.auth.session_revocation import (
+    revoke_active_device_sessions,
+    revoke_all_user_sessions,
+    revoke_session,
+)
 from nebula_api.db.engine import SessionFactory
 from nebula_api.identity import normalize_email, normalize_username
 from nebula_api.models.approval import PasswordResetToken
@@ -148,7 +153,7 @@ class UserAuthService:
                 client_version=client_version,
                 now=now,
             )
-            await self._revoke_active_device_sessions(session, device.id, now=now)
+            await revoke_active_device_sessions(session, device.id, now=now)
             session_id = uuid4()
             family_expires_at = now + timedelta(days=self._settings.refresh_token_ttl_days)
             user_session = UserSession(
@@ -241,7 +246,7 @@ class UserAuthService:
             if user_session is None:
                 raise AuthenticationRejected("Authentication was not accepted")
             if token.state is TokenState.CONSUMED:
-                await self._revoke_session(session, user_session, now=now)
+                await revoke_session(session, user_session, now=now)
                 _add_audit(
                     session,
                     actor_kind="user",
@@ -260,7 +265,7 @@ class UserAuthService:
             )
             device = await session.scalar(select(Device).where(Device.id == user_session.device_id))
             if not _refresh_is_eligible(token, user_session, user, device, now):
-                await self._revoke_session(session, user_session, now=now)
+                await revoke_session(session, user_session, now=now)
                 _add_audit(
                     session,
                     actor_kind="user",
@@ -332,7 +337,7 @@ class UserAuthService:
             )
             if user_session is None:
                 return
-            await self._revoke_session(session, user_session, now=now)
+            await revoke_session(session, user_session, now=now)
             _add_audit(
                 session,
                 actor_kind="user",
@@ -497,7 +502,7 @@ class UserAuthService:
                 )
                 .values(state=TokenState.REVOKED, revoked_at=now)
             )
-            await self._revoke_all_user_sessions(session, user.id, now=now)
+            await revoke_all_user_sessions(session, user.id, now=now)
             _add_audit(
                 session,
                 actor_kind="user",
@@ -599,80 +604,6 @@ class UserAuthService:
         )
         session.add(device)
         return device
-
-    async def _revoke_active_device_sessions(
-        self, session: AsyncSession, device_id: UUID, *, now: datetime
-    ) -> None:
-        session_ids = list(
-            (
-                await session.scalars(
-                    select(UserSession.id)
-                    .where(
-                        UserSession.device_id == device_id,
-                        UserSession.state == LifecycleState.ACTIVE,
-                    )
-                    .with_for_update()
-                )
-            ).all()
-        )
-        if not session_ids:
-            return
-        await session.execute(
-            update(UserSession)
-            .where(UserSession.id.in_(session_ids))
-            .values(state=LifecycleState.REVOKED, revoked_at=now)
-        )
-        await session.execute(
-            update(RefreshToken)
-            .where(
-                RefreshToken.session_id.in_(session_ids),
-                RefreshToken.state == TokenState.ACTIVE,
-            )
-            .values(state=TokenState.REVOKED, revoked_at=now)
-        )
-
-    async def _revoke_session(
-        self, session: AsyncSession, user_session: UserSession, *, now: datetime
-    ) -> None:
-        if user_session.state is LifecycleState.ACTIVE:
-            user_session.state = LifecycleState.REVOKED
-            user_session.revoked_at = now
-        await session.execute(
-            update(RefreshToken)
-            .where(
-                RefreshToken.session_id == user_session.id,
-                RefreshToken.state == TokenState.ACTIVE,
-            )
-            .values(state=TokenState.REVOKED, revoked_at=now)
-        )
-
-    async def _revoke_all_user_sessions(
-        self, session: AsyncSession, user_id: UUID, *, now: datetime
-    ) -> None:
-        session_ids = list(
-            (
-                await session.scalars(
-                    select(UserSession.id).where(UserSession.user_id == user_id).with_for_update()
-                )
-            ).all()
-        )
-        if session_ids:
-            await session.execute(
-                update(UserSession)
-                .where(
-                    UserSession.id.in_(session_ids),
-                    UserSession.state == LifecycleState.ACTIVE,
-                )
-                .values(state=LifecycleState.REVOKED, revoked_at=now)
-            )
-            await session.execute(
-                update(RefreshToken)
-                .where(
-                    RefreshToken.session_id.in_(session_ids),
-                    RefreshToken.state == TokenState.ACTIVE,
-                )
-                .values(state=TokenState.REVOKED, revoked_at=now)
-            )
 
     def _new_refresh_token(
         self,

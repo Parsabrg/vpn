@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     password_reset_rate_limit: int = Field(default=5, ge=1, le=50)
     account_request_rate_limit: int = Field(default=5, ge=1, le=50)
     account_request_review_rate_limit: int = Field(default=20, ge=1, le=100)
+    admin_user_mutation_rate_limit: int = Field(default=20, ge=1, le=100)
     admin_lockout_threshold: int = Field(default=5, ge=2, le=20)
     admin_lockout_seconds: int = Field(default=900, ge=60, le=86_400)
 

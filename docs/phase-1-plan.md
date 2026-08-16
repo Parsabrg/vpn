@@ -54,7 +54,7 @@ HttpOnly sessions, CSRF, rate limits, lockout, password reset, and audit events.
 Adversarial tests cover enumeration, expired/reused tokens, session fixation, CSRF,
 authorization boundaries, lockout bypass, and secret redaction.
 
-## Phase 1.4 — request, approval, and email workflow (current)
+## Phase 1.4 — request, approval, and email workflow (complete)
 
 Implement neutral account requests, duplicate suppression, outbox delivery, SMTP and
 Resend adapters, authenticated review, concurrent/idempotent approval, rejection,
@@ -73,7 +73,7 @@ retains a raw activation link or token, per the no-body/no-link constraint on
 `services/api/tests/test_account_request_concurrency.py`, a real-PostgreSQL test
 gated the same way as the existing live-database tests.
 
-## Phase 1.5 — administrator dashboard
+## Phase 1.5 — administrator dashboard (current)
 
 Build the accessible responsive design system, login/MFA, overview, request queues,
 review actions, users, device/session controls, permissions, assignments, health,
@@ -85,6 +85,23 @@ raw Xray combinations or configuration fragments.
 
 Component and API-contract tests cover loading, empty, error, forbidden, expired
 session, keyboard, reduced-motion, and responsive states.
+
+Delivered as: four new admin API packages behind reusable `require_admin_session`/
+`authorize_admin_mutation` gates in `services/api/src/nebula_api/` --
+`audit/` and `email_deliveries/` (read-only), `topology_admin/` (read-only,
+deliberately empty until Phase 1.6 provisions anything), and `user_management/`
+(list/detail plus disable/reactivate/device-revoke/session-revoke, step-up-MFA
+gated and idempotent under concurrent retry, proven in
+`test_user_management_concurrency.py`). The `apps/admin` Next.js app is now a real
+session-gated dashboard rather than the Phase 1.1 placeholder: password/TOTP
+sign-in, an overview, account-request review, filterable/paginated audit-log and
+email-delivery tables, user management with a step-up TOTP retry flow for its
+mutations, and honest empty-state shells for permissions/assignments/server-health
+that name the Phase 1.6 dependency instead of faking data. Every admin mutation
+maps onto the audit vocabulary already defined in
+`services/api/src/nebula_api/models/operations.py`; permission-granting and
+server-assignment mutation UI/API are intentionally out of scope until Phase 1.6
+gives them something real to act on.
 
 ## Phase 1.6 — protocol-neutral VPN agent and WireGuard provisioning
 

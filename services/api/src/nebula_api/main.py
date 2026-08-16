@@ -14,6 +14,8 @@ from nebula_api.accounts.email_outbox import EmailOutboxRedisClient
 from nebula_api.accounts.routes import admin_router as account_request_admin_router
 from nebula_api.accounts.routes import router as account_request_router
 from nebula_api.accounts.service import AccountRequestService
+from nebula_api.audit.routes import router as audit_log_router
+from nebula_api.audit.service import AuditLogService
 from nebula_api.auth.admin_routes import router as admin_auth_router
 from nebula_api.auth.admin_service import AdminAuthService
 from nebula_api.auth.http import install_auth_http_safeguards
@@ -23,8 +25,14 @@ from nebula_api.auth.user_routes import router as user_auth_router
 from nebula_api.auth.user_service import PasswordResetDelivery, UserAuthService
 from nebula_api.db.engine import create_database_engine, create_session_factory
 from nebula_api.db.schema import schema_is_current
+from nebula_api.email_deliveries.routes import router as email_delivery_router
+from nebula_api.email_deliveries.service import EmailDeliveryService
 from nebula_api.request_limits import RequestBodyLimitMiddleware
 from nebula_api.settings import Settings, get_settings
+from nebula_api.topology_admin.routes import router as topology_admin_router
+from nebula_api.topology_admin.service import TopologyAdminService
+from nebula_api.user_management.routes import router as user_management_router
+from nebula_api.user_management.service import UserManagementService
 
 ReadinessCheck = Callable[[], Awaitable[bool]]
 
@@ -46,6 +54,10 @@ def create_app(
     user_auth_service: UserAuthService | None = None,
     admin_auth_service: AdminAuthService | None = None,
     account_request_service: AccountRequestService | None = None,
+    audit_log_service: AuditLogService | None = None,
+    email_delivery_service: EmailDeliveryService | None = None,
+    topology_admin_service: TopologyAdminService | None = None,
+    user_management_service: UserManagementService | None = None,
     password_reset_delivery: PasswordResetDelivery | None = None,
 ) -> FastAPI:
     """Create an API instance with startup and database-gated readiness."""
@@ -56,6 +68,10 @@ def create_app(
     effective_user_auth_service = user_auth_service
     effective_admin_auth_service = admin_auth_service
     effective_account_request_service = account_request_service
+    effective_audit_log_service = audit_log_service
+    effective_email_delivery_service = email_delivery_service
+    effective_topology_admin_service = topology_admin_service
+    effective_user_management_service = user_management_service
     effective_readiness_check: ReadinessCheck
 
     if readiness_check is None:
@@ -94,6 +110,22 @@ def create_app(
                     key_material,
                     runtime_settings,
                 )
+            if effective_user_management_service is None:
+                effective_user_management_service = UserManagementService(
+                    create_session_factory(database_engine),
+                    redis_auth_state,
+                    runtime_settings,
+                )
+        if effective_audit_log_service is None:
+            effective_audit_log_service = AuditLogService(create_session_factory(database_engine))
+        if effective_email_delivery_service is None:
+            effective_email_delivery_service = EmailDeliveryService(
+                create_session_factory(database_engine)
+            )
+        if effective_topology_admin_service is None:
+            effective_topology_admin_service = TopologyAdminService(
+                create_session_factory(database_engine)
+            )
 
         async def database_and_redis_readiness_check() -> bool:
             try:
@@ -136,6 +168,10 @@ def create_app(
     application.state.user_auth_service = effective_user_auth_service
     application.state.admin_auth_service = effective_admin_auth_service
     application.state.account_request_service = effective_account_request_service
+    application.state.audit_log_service = effective_audit_log_service
+    application.state.email_delivery_service = effective_email_delivery_service
+    application.state.topology_admin_service = effective_topology_admin_service
+    application.state.user_management_service = effective_user_management_service
     application.state.password_reset_delivery = password_reset_delivery
     install_auth_http_safeguards(application, runtime_settings)
     application.add_middleware(
@@ -146,6 +182,10 @@ def create_app(
     application.include_router(admin_auth_router)
     application.include_router(account_request_router)
     application.include_router(account_request_admin_router)
+    application.include_router(audit_log_router)
+    application.include_router(email_delivery_router)
+    application.include_router(topology_admin_router)
+    application.include_router(user_management_router)
 
     @application.get("/healthz", response_model=ProbeResponse, tags=["probes"])
     async def health() -> ProbeResponse:
