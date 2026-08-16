@@ -1,15 +1,21 @@
 # Development guide
 
-The Phase 1.4 workspaces include the runnable service shells, control-plane
-persistence foundation, user/administrator authentication security, and the
-account request/approval/activation workflow. The API has PostgreSQL models and
-migrations, Redis-backed authentication state, database-backed readiness, an
-initial-administrator seed command, versioned authentication endpoints, and
-neutral account-request submission plus admin review routes. A separate `worker`
-process leases the `email_deliveries` outbox and sends activation, password-reset,
-and review-notification email through SMTP (Mailpit locally) or Resend. VPN
-provisioning, WireGuard/Xray runtime integration, administrator UI integration, and
-production deployment remain future phases.
+The Phase 1.5 workspaces include the runnable service shells, control-plane
+persistence foundation, user/administrator authentication security, the account
+request/approval/activation workflow, and an administrator dashboard. The API has
+PostgreSQL models and migrations, Redis-backed authentication state,
+database-backed readiness, an initial-administrator seed command, versioned
+authentication endpoints, neutral account-request submission plus admin review
+routes, and read/write admin routes for audit log, email-delivery status,
+read-only topology, and user management. A separate `worker` process leases the
+`email_deliveries` outbox and sends activation, password-reset, and
+review-notification email through SMTP (Mailpit locally) or Resend. `apps/admin`
+is a session-gated Next.js dashboard covering sign-in/MFA, account-request review,
+user management with step-up-MFA-gated device/session revocation, and audit/email
+visibility; its permissions, assignments, and server-health pages are honest
+empty-state shells until Phase 1.6 provisions any VPN server or protocol profile.
+VPN provisioning, WireGuard/Xray runtime integration, and production deployment
+remain future phases.
 
 ## Pinned toolchain
 

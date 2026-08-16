@@ -4,9 +4,9 @@ Last updated: 2026-08-16
 
 ## Current phase
 
-Phase 1.4 — account request, approval, and email workflow, implemented for review.
-Phase 1.1 was squash-merged in pull request #2, Phase 1.2 in pull request #5, and
-Phase 1.3 in pull request #10.
+Phase 1.5 — administrator dashboard, implemented for review. Phase 1.1 was
+squash-merged in pull request #2, Phase 1.2 in pull request #5, Phase 1.3 in
+pull request #10, and Phase 1.4 in pull request #24.
 
 ## Completed
 
@@ -81,19 +81,40 @@ Phase 1.3 in pull request #10.
   retries with backoff before marking a delivery failed.
 - Wired the worker into the Compose stack and CI (lint, type check, tests, Trivy
   image scan, Dependabot) alongside the API and VPN agent.
+- Added four new read/write API packages behind reusable admin-session and
+  step-up-MFA authorization gates: append-only audit-log and email-delivery
+  read endpoints, a read-only topology package (protocols, protocol profiles,
+  VPN servers) that stays deliberately empty until Phase 1.6 provisions
+  anything, and a user-management package (list/detail, disable/reactivate,
+  device/session revocation) whose mutations are idempotent under concurrent
+  retry, proven with a new real-PostgreSQL concurrency test.
+- Replaced the Phase 1.1 admin placeholder pages with a real, session-gated
+  Next.js dashboard: password/TOTP sign-in, an overview composed from the
+  existing list endpoints, account-request review, filterable/paginated audit
+  log and email-delivery tables, user management with device/session revocation
+  behind a step-up TOTP retry flow, and honest empty-state shells for
+  permissions/assignments/server health that explain the Phase 1.6 dependency
+  instead of faking data.
+- Added the CSS this phase's markup needed (buttons, fields, badges, data
+  tables with a card breakpoint, dialogs, pagination) and test coverage across
+  loading, empty, error, forbidden, expired-session, keyboard, reduced-motion,
+  and responsive states.
 
 ## Validation recorded locally
 
-- API: Ruff, format, and strict mypy across 66 source/test files pass. The suite
-  collects 346 tests and remains above the 95% branch-coverage gate (96.8%); two
-  live PostgreSQL tests, the real-Redis atomicity test, and the new account-request
-  concurrency test skip when those services are not configured locally and run in
-  CI.
+- API: Ruff, format, and strict mypy pass. The suite collects 404 tests (5 skip
+  locally) and remains above the 95% branch-coverage gate (96.6%); the live
+  PostgreSQL tests, the real-Redis atomicity test, and the account-request and
+  user-management concurrency tests skip when those services are not configured
+  locally and run in CI.
 - Worker: Ruff, format, and strict mypy across 19 source/test files pass. The suite
   collects 49 tests and remains above the 95% branch-coverage gate (96.3%).
 - VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
-- Admin: Prettier, ESLint, strict TypeScript, 5 Vitest tests, and the production
-  build pass; the image vulnerability scan remains a required CI gate.
+- Admin: Prettier, ESLint, strict TypeScript, 32 Vitest tests, and the production
+  build pass with `NEBULA_API_INTERNAL_URL`/`NEBULA_ADMIN_ORIGIN` set (now required
+  at build time so Next's static/dynamic bailout can reach the `cookies()` call
+  every protected route depends on); the image vulnerability scan remains a
+  required CI gate.
 - `compose.yaml` parses and the `worker` service is correctly wired to
   postgres/redis/mailpit health gates and the one-shot `migrate` job.
 - All four Alembic revisions render successfully as offline PostgreSQL SQL, and
@@ -118,17 +139,22 @@ therefore remain CI gates rather than locally verified claims.
 
 ## Next milestone
 
-- Review and merge Phase 1.4 account request/approval/email workflow after all CI
-  checks pass.
+- Review and merge the Phase 1.5 administrator dashboard after all CI checks pass.
 - Generate Android and Windows host projects after support versions are confirmed.
-- Begin Phase 1.5 administrator dashboard (request queue, review actions, user and
-  device management) in a separate pull request.
+- Begin Phase 1.6 VPN server and protocol-profile provisioning, which the
+  permissions, assignments, and server-health admin pages are already wired to
+  read from once it exists.
 
 ## Known limitations
 
-- Account request, approval, activation, and outbox email delivery exist, but VPN
+- Account request, approval, activation, outbox email delivery, and an
+  administrator dashboard to review and act on all of it now exist, but VPN
   provisioning, WireGuard/Xray runtime integration, native tunnel integration,
-  administrator UI integration, backup, or production deployment does not exist yet.
+  backup, or production deployment does not exist yet.
+- The administrator dashboard's permissions, assignments, and server-health pages
+  are honest empty-state shells: no VPN server or protocol profile has ever been
+  created, and permissions/assignments have no backend API at all yet, both by
+  design until Phase 1.6.
 - The worker's SMTP/Resend adapters are exercised against Mailpit and mocked
   transports; no production email provider credentials have been configured or
   verified end-to-end yet.
