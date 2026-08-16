@@ -39,6 +39,8 @@ jobs:
             context: services/api
           - name: vpn-agent
             context: services/vpn-agent
+          - name: worker
+            context: services/worker
           - name: admin
             context: apps/admin
     steps:

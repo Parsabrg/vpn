@@ -8,6 +8,7 @@ on:
       - "apps/admin/**"
       - "services/api/**"
       - "services/vpn-agent/**"
+      - "services/worker/**"
       - ".github/workflows/compose.yml"
   push:
     branches: [main]
@@ -17,6 +18,7 @@ on:
       - "apps/admin/**"
       - "services/api/**"
       - "services/vpn-agent/**"
+      - "services/worker/**"
       - ".github/workflows/compose.yml"
 
 permissions:

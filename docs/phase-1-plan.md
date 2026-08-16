@@ -45,7 +45,7 @@ in the architecture.
 Checks include forward migration from empty DB, downgrade/upgrade where safe,
 constraint tests, normalized identity uniqueness, and migration smoke tests.
 
-## Phase 1.3 — authentication and administrator security (current)
+## Phase 1.3 — authentication and administrator security (complete)
 
 Implement Argon2id, user access/refresh flow, token-family rotation and reuse
 detection, device sessions, logout/revocation, administrator password + TOTP MFA,
@@ -54,7 +54,7 @@ HttpOnly sessions, CSRF, rate limits, lockout, password reset, and audit events.
 Adversarial tests cover enumeration, expired/reused tokens, session fixation, CSRF,
 authorization boundaries, lockout bypass, and secret redaction.
 
-## Phase 1.4 — request, approval, and email workflow
+## Phase 1.4 — request, approval, and email workflow (current)
 
 Implement neutral account requests, duplicate suppression, outbox delivery, SMTP and
 Resend adapters, authenticated review, concurrent/idempotent approval, rejection,
@@ -62,6 +62,16 @@ activation, password creation, and delivery tracking.
 
 The milestone must pass concurrent approval tests proving that exactly one user and
 one active activation token result from retries.
+
+Delivered as: account-request submission and admin approve/reject routes in
+`services/api/src/nebula_api/accounts/`, reusing the Phase 1.2 schema unchanged; a
+new standalone `services/worker` process that leases the `email_deliveries` outbox
+with `SELECT ... FOR UPDATE SKIP LOCKED` and delivers through stdlib-only SMTP/Resend
+adapters; and a Redis-staged one-time payload handoff so the outbox row itself never
+retains a raw activation link or token, per the no-body/no-link constraint on
+`EmailDelivery`. The concurrent-approval requirement is proven in
+`services/api/tests/test_account_request_concurrency.py`, a real-PostgreSQL test
+gated the same way as the existing live-database tests.
 
 ## Phase 1.5 — administrator dashboard
 

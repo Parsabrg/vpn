@@ -10,6 +10,10 @@ from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
 from nebula_api import __version__
+from nebula_api.accounts.email_outbox import EmailOutboxRedisClient
+from nebula_api.accounts.routes import admin_router as account_request_admin_router
+from nebula_api.accounts.routes import router as account_request_router
+from nebula_api.accounts.service import AccountRequestService
 from nebula_api.auth.admin_routes import router as admin_auth_router
 from nebula_api.auth.admin_service import AdminAuthService
 from nebula_api.auth.http import install_auth_http_safeguards
@@ -41,6 +45,7 @@ def create_app(
     readiness_check: ReadinessCheck | None = None,
     user_auth_service: UserAuthService | None = None,
     admin_auth_service: AdminAuthService | None = None,
+    account_request_service: AccountRequestService | None = None,
     password_reset_delivery: PasswordResetDelivery | None = None,
 ) -> FastAPI:
     """Create an API instance with startup and database-gated readiness."""
@@ -50,6 +55,7 @@ def create_app(
     redis_client: Redis | None = None
     effective_user_auth_service = user_auth_service
     effective_admin_auth_service = admin_auth_service
+    effective_account_request_service = account_request_service
     effective_readiness_check: ReadinessCheck
 
     if readiness_check is None:
@@ -77,6 +83,14 @@ def create_app(
                 effective_admin_auth_service = AdminAuthService(
                     create_session_factory(database_engine),
                     redis_auth_state,
+                    key_material,
+                    runtime_settings,
+                )
+            if effective_account_request_service is None:
+                effective_account_request_service = AccountRequestService(
+                    create_session_factory(database_engine),
+                    redis_auth_state,
+                    cast(EmailOutboxRedisClient, redis_client),
                     key_material,
                     runtime_settings,
                 )
@@ -121,6 +135,7 @@ def create_app(
     application.state.redis_client = redis_client
     application.state.user_auth_service = effective_user_auth_service
     application.state.admin_auth_service = effective_admin_auth_service
+    application.state.account_request_service = effective_account_request_service
     application.state.password_reset_delivery = password_reset_delivery
     install_auth_http_safeguards(application, runtime_settings)
     application.add_middleware(
@@ -129,6 +144,8 @@ def create_app(
     )
     application.include_router(user_auth_router)
     application.include_router(admin_auth_router)
+    application.include_router(account_request_router)
+    application.include_router(account_request_admin_router)
 
     @application.get("/healthz", response_model=ProbeResponse, tags=["probes"])
     async def health() -> ProbeResponse:

@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling==1.31.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nebula-worker"
+version = "0.1.0"
+description = "Nebula email outbox worker: leases, sends, and tracks queued email"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "pydantic-settings==2.14.2",
+  "psycopg[binary]==3.3.4",
+  "redis==8.0.1",
+  "sqlalchemy[asyncio]==2.0.51",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy==2.3.0",
+  "pip-audit==2.10.1",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "ruff==0.15.22",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nebula_worker"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers --cov=nebula_worker --cov-report=term-missing --cov-fail-under=95"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
