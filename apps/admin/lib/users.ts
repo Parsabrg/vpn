@@ -1,5 +1,4 @@
 import "server-only";
-import { type ActionResult, toActionResult } from "@/lib/api/action-result";
 import { apiFetch } from "@/lib/api/client";
 
 export type UserState =
@@ -171,56 +170,4 @@ export async function getUserDetail(
   } catch {
     return null;
   }
-}
-
-export async function disableUser(
-  userId: string,
-): Promise<ActionResult<UserListItem>> {
-  "use server";
-  return toActionResult(
-    apiFetch<UserListItemBody>(`/v1/admin/users/${userId}/disable`, {
-      method: "POST",
-    }).then(toUserItem),
-  );
-}
-
-export async function reactivateUser(
-  userId: string,
-): Promise<ActionResult<UserListItem>> {
-  "use server";
-  return toActionResult(
-    apiFetch<UserListItemBody>(`/v1/admin/users/${userId}/reactivate`, {
-      method: "POST",
-    }).then(toUserItem),
-  );
-}
-
-export async function revokeDevice(
-  userId: string,
-  deviceId: string,
-): Promise<ActionResult<DeviceListItem>> {
-  "use server";
-  return toActionResult(
-    apiFetch<DeviceListItemBody>(
-      `/v1/admin/users/${userId}/devices/${deviceId}/revoke`,
-      {
-        method: "POST",
-      },
-    ).then(toDeviceItem),
-  );
-}
-
-export async function revokeUserSession(
-  userId: string,
-  sessionId: string,
-): Promise<ActionResult<UserSessionListItem>> {
-  "use server";
-  return toActionResult(
-    apiFetch<UserSessionListItemBody>(
-      `/v1/admin/users/${userId}/sessions/${sessionId}/revoke`,
-      {
-        method: "POST",
-      },
-    ).then(toSessionItem),
-  );
 }

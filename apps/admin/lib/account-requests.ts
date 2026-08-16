@@ -1,5 +1,4 @@
 import "server-only";
-import { type ActionResult, toActionResult } from "@/lib/api/action-result";
 import { apiFetch } from "@/lib/api/client";
 
 export type AccountRequestState =
@@ -42,34 +41,4 @@ export async function listPendingAccountRequests(): Promise<
     "/v1/admin/account-requests/",
   );
   return body.items.map(toItem);
-}
-
-export async function approveAccountRequest(
-  id: string,
-): Promise<ActionResult<AccountRequestListItem>> {
-  "use server";
-  return toActionResult(
-    apiFetch<AccountRequestItemBody>(
-      `/v1/admin/account-requests/${id}/approve`,
-      {
-        method: "POST",
-      },
-    ).then(toItem),
-  );
-}
-
-export async function rejectAccountRequest(
-  id: string,
-  reason: string | null,
-): Promise<ActionResult<AccountRequestListItem>> {
-  "use server";
-  return toActionResult(
-    apiFetch<AccountRequestItemBody>(
-      `/v1/admin/account-requests/${id}/reject`,
-      {
-        method: "POST",
-        body: { reason },
-      },
-    ).then(toItem),
-  );
 }
