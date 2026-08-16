@@ -78,6 +78,9 @@ class ScriptedSession:
     def add_all(self, values: Iterable[object]) -> None:
         self.added.extend(values)
 
+    async def flush(self) -> None:
+        return None
+
     async def commit(self) -> None:
         self.commits += 1
 

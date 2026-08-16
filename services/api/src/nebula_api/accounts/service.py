@@ -238,6 +238,11 @@ class AccountRequestService:
                     device_limit=self._settings.default_device_limit,
                 )
             )
+            # Flush the new user row before pointing account_requests.user_id at
+            # it: there is no ORM relationship() between the two tables, so the
+            # unit of work does not otherwise guarantee the insert is ordered
+            # before this update, and the foreign key rejects the reverse order.
+            await session.flush()
             account_request.state = RequestState.APPROVED
             account_request.decided_at = now
             account_request.reviewed_by_admin_id = admin_id
