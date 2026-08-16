@@ -160,6 +160,7 @@ def test_account_request_defaults_are_bounded() -> None:
     assert settings.default_device_limit == 3
     assert settings.account_request_rate_limit == 5
     assert settings.account_request_review_rate_limit == 20
+    assert settings.admin_user_mutation_rate_limit == 20
 
 
 @pytest.mark.parametrize(
@@ -173,6 +174,7 @@ def test_account_request_defaults_are_bounded() -> None:
         ("default_device_limit", 21),
         ("account_request_rate_limit", 0),
         ("account_request_review_rate_limit", 0),
+        ("admin_user_mutation_rate_limit", 0),
     ],
 )
 def test_account_request_settings_reject_out_of_bounds_values(field: str, value: int) -> None:
