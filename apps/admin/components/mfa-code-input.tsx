@@ -7,7 +7,7 @@ interface MfaCodeInputProps {
 /** Uncontrolled: the enclosing form reads its value via FormData on submit. */
 export function MfaCodeInput({ id, label, autoFocus }: MfaCodeInputProps) {
   return (
-    <div className="field">
+    <div className="field mfa-code-input">
       <label htmlFor={id} className="field__label">
         {label}
       </label>
