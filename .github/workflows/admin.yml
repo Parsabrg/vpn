@@ -31,4 +31,7 @@ jobs:
         run: npm audit --omit=dev --audit-level=moderate
       - name: Check
         working-directory: apps/admin
+        env:
+          NEBULA_API_INTERNAL_URL: http://api:8000
+          NEBULA_ADMIN_ORIGIN: http://localhost:3000
         run: npm run check
