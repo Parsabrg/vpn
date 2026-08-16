@@ -26,15 +26,13 @@ afterEach(() => {
 
 describe("LoginFlow", () => {
   it("submits credentials and moves to the MFA step via keyboard", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(
-        jsonResponse({
-          challenge: "v1.challenge",
-          next_step: "mfa",
-          expires_in: 300,
-        }),
-      );
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        challenge: "v1.challenge",
+        next_step: "mfa",
+        expires_in: 300,
+      }),
+    );
     vi.stubGlobal("fetch", fetchMock);
     const user = userEvent.setup();
 

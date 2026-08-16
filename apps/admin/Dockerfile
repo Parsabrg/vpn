@@ -9,6 +9,11 @@ RUN npm ci
 FROM toolchain AS builder
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
+# Placeholder values so `next build` can reach the cookies() call that marks
+# every protected route dynamic instead of throwing before it gets there; the
+# real values are supplied at container runtime (see compose.yaml).
+ENV NEBULA_API_INTERNAL_URL=http://api:8000
+ENV NEBULA_ADMIN_ORIGIN=http://localhost:3000
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY . .
 RUN npm run build
