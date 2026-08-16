@@ -36,6 +36,11 @@ class Settings(BaseSettings):
     xray_state_dir: PurePosixPath = PurePosixPath("/var/lib/nebula/xray")
     xray_validate_timeout_seconds: int = Field(default=10, ge=1, le=60)
     xray_apply_timeout_seconds: int = Field(default=20, ge=1, le=120)
+    wg_driver: Literal["fake", "native"] = "fake"
+    operation_ledger_file: PurePosixPath = PurePosixPath(
+        "/var/lib/nebula/wireguard/operation_ledger.jsonl"
+    )
+    operation_ledger_max_entries: int = Field(default=10_000, ge=100, le=1_000_000)
 
     @field_validator("wg_interface")
     @classmethod
@@ -49,6 +54,7 @@ class Settings(BaseSettings):
         "xray_binary",
         "xray_config_dir",
         "xray_state_dir",
+        "operation_ledger_file",
     )
     @classmethod
     def require_absolute_host_path(cls, value: PurePosixPath) -> PurePosixPath:
