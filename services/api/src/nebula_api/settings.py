@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     mfa_encryption_key_file: Path | None = None
     mfa_key_version: int = Field(default=1, ge=1, le=2_147_483_647)
 
+    agent_client_cert_file: Path | None = None
+    agent_client_key_file: Path | None = None
+    agent_trusted_ca_file: Path | None = None
+    agent_request_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=3_600)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
     password_reset_ttl_minutes: int = Field(default=30, ge=5, le=120)
@@ -156,6 +161,9 @@ class Settings(BaseSettings):
             "jwt_public_key_file": self.jwt_public_key_file,
             "token_pepper_file": self.token_pepper_file,
             "mfa_encryption_key_file": self.mfa_encryption_key_file,
+            "agent_client_cert_file": self.agent_client_cert_file,
+            "agent_client_key_file": self.agent_client_key_file,
+            "agent_trusted_ca_file": self.agent_trusted_ca_file,
         }
         missing = [name for name, path in required_secret_files.items() if path is None]
         if missing:

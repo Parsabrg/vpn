@@ -51,6 +51,9 @@ def test_safe_production_urls_are_normalized(tmp_path: Path) -> None:
         jwt_public_key_file=tmp_path / "jwt_public_key",
         token_pepper_file=tmp_path / "token_pepper",
         mfa_encryption_key_file=tmp_path / "mfa_encryption_key",
+        agent_client_cert_file=tmp_path / "agent_client_cert",
+        agent_client_key_file=tmp_path / "agent_client_key",
+        agent_trusted_ca_file=tmp_path / "agent_trusted_ca",
     )
 
     assert settings.api_public_url == "https://api.example.com"
@@ -58,6 +61,28 @@ def test_safe_production_urls_are_normalized(tmp_path: Path) -> None:
     assert settings.allowed_origins == ("https://admin.example.com/,https://support.example.com")
     assert settings.admin_cookie_name == "__Host-nebula_admin"
     assert settings.admin_cookie_secure
+
+
+def test_production_requires_agent_mtls_secret_files(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="production authentication secret files"):
+        Settings(
+            env="production",
+            api_public_url="https://api.example.com",
+            admin_public_url="https://admin.example.com",
+            allowed_origins="https://admin.example.com",
+            redis_url="rediss://:production-password@redis.example.com:6379/0",
+            jwt_private_key_file=tmp_path / "jwt_private_key",
+            jwt_public_key_file=tmp_path / "jwt_public_key",
+            token_pepper_file=tmp_path / "token_pepper",
+            mfa_encryption_key_file=tmp_path / "mfa_encryption_key",
+        )
+
+
+def test_agent_request_timeout_seconds_must_be_within_bounds() -> None:
+    with pytest.raises(ValidationError):
+        Settings(agent_request_timeout_seconds=0.5)
+    with pytest.raises(ValidationError):
+        Settings(agent_request_timeout_seconds=61)
 
 
 def test_unknown_explicit_setting_is_rejected() -> None:
