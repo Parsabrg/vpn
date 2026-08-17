@@ -22,7 +22,10 @@ class ResendAdapter:
         payload = json.dumps(
             {"from": self._settings.email_from, "to": [to], "subject": subject, "text": body}
         ).encode("utf-8")
-        request = urllib.request.Request(  # noqa: S310 - fixed https endpoint, not user input
+        # The URL is the fixed https constant above, never user input -- ruff
+        # can prove that for Request() itself, but not through the request
+        # object handed to urlopen(), which still needs S310 suppressed.
+        request = urllib.request.Request(
             _RESEND_ENDPOINT,
             data=payload,
             method="POST",

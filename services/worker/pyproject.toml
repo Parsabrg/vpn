@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling==1.31.0"]
+requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [project]
@@ -9,10 +9,10 @@ description = "Nebula email outbox worker: leases, sends, and tracks queued emai
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
-  "pydantic-settings==2.14.2",
+  "pydantic-settings==2.15.0",
   "psycopg[binary]==3.3.4",
-  "redis==8.0.1",
-  "sqlalchemy[asyncio]==2.0.51",
+  "redis==8.1.0",
+  "sqlalchemy[asyncio]==2.0.52",
 ]
 
 [project.optional-dependencies]
@@ -21,7 +21,7 @@ dev = [
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.15.22",
+  "ruff==0.16.3",
 ]
 
 [tool.hatch.build.targets.wheel]
