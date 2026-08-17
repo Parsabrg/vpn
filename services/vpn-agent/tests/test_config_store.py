@@ -93,8 +93,17 @@ def test_write_candidate_atomically_leaves_no_temp_file_on_success(tmp_path: Pat
     store = ConfigStore(PurePosixPath(str(tmp_path)), "wg0")
     store.write_candidate_atomically("[Peer]\n")
 
-    remaining = {path.name for path in tmp_path.iterdir()}
-    assert remaining == {"wg0.conf.candidate"}
+    remaining = {path.name for path in (tmp_path / "candidate").iterdir()}
+    assert remaining == {"wg0.conf"}
+
+
+def test_candidate_path_is_named_exactly_interface_dot_conf(tmp_path: Path) -> None:
+    # wg-quick derives the interface name it validates from the basename
+    # with a trailing ".conf" stripped -- a suffix like ".conf.candidate"
+    # leaves ".conf" un-stripped and produces a name wg-quick itself rejects.
+    store = ConfigStore(PurePosixPath(str(tmp_path)), "wg0")
+    assert store.candidate_path.name == "wg0.conf"
+    assert store.candidate_path != store.last_known_good_path
 
 
 def test_write_candidate_atomically_cleans_up_the_temp_file_on_failure(
@@ -110,7 +119,9 @@ def test_write_candidate_atomically_cleans_up_the_temp_file_on_failure(
     with pytest.raises(OSError, match="simulated rename failure"):
         store.write_candidate_atomically("[Peer]\n")
 
-    assert list(tmp_path.iterdir()) == []
+    # The (empty) candidate/ directory is harmless to leave behind; only the
+    # temp file itself must not survive a failed write.
+    assert list((tmp_path / "candidate").iterdir()) == []
 
 
 def test_parse_ignores_unrecognized_lines() -> None:

@@ -134,7 +134,16 @@ class ConfigStore:
     Layout under state_dir:
       <interface>.conf           -- last-known-good peer set, the only file a
                                      restart should ever read back from
-      <interface>.conf.candidate -- a just-rendered, not-yet-promoted candidate
+      candidate/<interface>.conf -- a just-rendered, not-yet-promoted candidate
+
+    Both files are named exactly `<interface>.conf`, in separate
+    directories, rather than distinguished by a suffix on one shared name:
+    `wg-quick strip` derives the interface name it validates from the
+    basename with a trailing `.conf` stripped (`${name%.conf}`), so a
+    non-`.conf`-suffixed candidate path (e.g. `wg0.conf.candidate`) leaves
+    the `.conf` un-stripped, and the resulting "interface name" is both
+    wrong and, past 15 characters, rejected by wg-quick's own name-length
+    check before it ever gets to parsing the config content.
     """
 
     def __init__(self, state_dir: PurePosixPath, interface: str) -> None:
@@ -147,7 +156,7 @@ class ConfigStore:
 
     @property
     def candidate_path(self) -> Path:
-        return self._dir / f"{self._interface}.conf.candidate"
+        return self._dir / "candidate" / f"{self._interface}.conf"
 
     def read_last_known_good(self) -> DesiredInterfaceState:
         """The baseline every operation computes its delta against -- read
@@ -162,8 +171,10 @@ class ConfigStore:
         return render_wireguard_config(desired)
 
     def write_candidate_atomically(self, text: str) -> Path:
-        self._dir.mkdir(parents=True, exist_ok=True)
-        descriptor, tmp_name = tempfile.mkstemp(dir=self._dir, prefix=f".{self._interface}.")
+        self.candidate_path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, tmp_name = tempfile.mkstemp(
+            dir=self.candidate_path.parent, prefix=f".{self._interface}."
+        )
         try:
             with os.fdopen(descriptor, "w") as handle:
                 handle.write(text)
