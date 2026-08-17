@@ -54,7 +54,6 @@ class FakeWireGuardRunner:
         self._client_dns = client_dns
         self._client_allowed_ips = client_allowed_ips
         self._persistent_keepalive_seconds = persistent_keepalive_seconds
-        self._generation = 0
         self._fail_next = False
 
     def fail_next_apply(self) -> None:
@@ -64,23 +63,30 @@ class FakeWireGuardRunner:
 
         self._fail_next = True
 
-    def _apply(self, new_state: DesiredInterfaceState) -> int:
+    def _last_applied_generation(self, public_key: str) -> int:
+        """What a failed apply reports: the peer's own last-applied
+        generation (0 if it was never successfully applied), never a global
+        counter -- two peers can legitimately be at different generations."""
+
+        previous = self._state.peer(public_key)
+        return 0 if previous is None else previous.generation
+
+    def _apply(self, new_state: DesiredInterfaceState) -> None:
         if self._fail_next:
             self._fail_next = False
             raise ApplyError("simulated apply failure")
-        self._generation += 1
         self._state = new_state
         if self._config_store is not None:
             text = self._config_store.render_candidate(new_state)
             candidate = self._config_store.write_candidate_atomically(text)
             self._config_store.promote_candidate_to_last_known_good(candidate)
-        return self._generation
 
     async def provision_device(self, request: ProvisionDeviceRequest) -> ProvisionDeviceResponse:
         peer = RenderedPeer(
             public_key=request.public_key,
             assigned_address=request.assigned_address,
             persistent_keepalive_seconds=request.persistent_keepalive_seconds,
+            generation=request.desired_generation,
         )
         common = {
             "server_public_key": self._server_public_key,
@@ -91,51 +97,62 @@ class FakeWireGuardRunner:
             "persistent_keepalive_seconds": self._persistent_keepalive_seconds,
         }
         try:
-            generation = self._apply(self._state.with_peer(peer))
+            self._apply(self._state.with_peer(peer))
         except ApplyError:
             return ProvisionDeviceResponse(
                 state="failed",
-                applied_generation=self._generation,
+                applied_generation=self._last_applied_generation(request.public_key),
                 error_code="apply_failed",
                 **common,
             )
-        return ProvisionDeviceResponse(state="active", applied_generation=generation, **common)
+        return ProvisionDeviceResponse(
+            state="active", applied_generation=request.desired_generation, **common
+        )
 
     async def revoke_device(self, request: RevokeDeviceRequest) -> RevokeDeviceResponse:
         try:
-            generation = self._apply(self._state.without_peer(request.public_key))
+            self._apply(self._state.without_peer(request.public_key))
         except ApplyError:
             return RevokeDeviceResponse(
                 state="failed",
-                applied_generation=self._generation,
+                applied_generation=self._last_applied_generation(request.public_key),
                 revoked_at=datetime.now(UTC),
                 error_code="apply_failed",
             )
         return RevokeDeviceResponse(
-            state="revoked", applied_generation=generation, revoked_at=datetime.now(UTC)
+            state="revoked",
+            applied_generation=request.desired_generation,
+            revoked_at=datetime.now(UTC),
         )
 
     async def enable_device(self, request: EnableDeviceRequest) -> EnableDeviceResponse:
         peer = RenderedPeer(
             public_key=request.public_key,
             assigned_address=request.assigned_address,
+            generation=request.desired_generation,
         )
         try:
-            generation = self._apply(self._state.with_peer(peer))
+            self._apply(self._state.with_peer(peer))
         except ApplyError:
             return EnableDeviceResponse(
-                state="failed", applied_generation=self._generation, error_code="apply_failed"
+                state="failed",
+                applied_generation=self._last_applied_generation(request.public_key),
+                error_code="apply_failed",
             )
-        return EnableDeviceResponse(state="enabled", applied_generation=generation)
+        return EnableDeviceResponse(state="enabled", applied_generation=request.desired_generation)
 
     async def disable_device(self, request: DisableDeviceRequest) -> DisableDeviceResponse:
         try:
-            generation = self._apply(self._state.without_peer(request.public_key))
+            self._apply(self._state.without_peer(request.public_key))
         except ApplyError:
             return DisableDeviceResponse(
-                state="failed", applied_generation=self._generation, error_code="apply_failed"
+                state="failed",
+                applied_generation=self._last_applied_generation(request.public_key),
+                error_code="apply_failed",
             )
-        return DisableDeviceResponse(state="disabled", applied_generation=generation)
+        return DisableDeviceResponse(
+            state="disabled", applied_generation=request.desired_generation
+        )
 
     async def health(self, request: HealthRequest) -> HealthResponse:
         return HealthResponse(
@@ -151,5 +168,5 @@ class FakeWireGuardRunner:
         if match is None:
             return ReconcileResponse(outcome="drift_detected", observed_generation=None)
         if match.assigned_address != request.assigned_address:
-            return ReconcileResponse(outcome="ambiguous", observed_generation=self._generation)
-        return ReconcileResponse(outcome="in_sync", observed_generation=self._generation)
+            return ReconcileResponse(outcome="ambiguous", observed_generation=match.generation)
+        return ReconcileResponse(outcome="in_sync", observed_generation=match.generation)

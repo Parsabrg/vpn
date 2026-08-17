@@ -10,8 +10,10 @@ from pydantic import BaseModel, ConfigDict
 from nebula_agent import __version__
 from nebula_agent.api.v1 import router as operations_router
 from nebula_agent.drivers.base import WireGuardDriver
+from nebula_agent.drivers.config_store import ConfigStore
 from nebula_agent.drivers.errors import DriverError
 from nebula_agent.drivers.fake import FakeWireGuardRunner
+from nebula_agent.drivers.wireguard import NativeWireGuardDriver
 from nebula_agent.ledger import OperationLedger
 from nebula_agent.settings import Settings, get_settings
 
@@ -29,9 +31,8 @@ class ProbeResponse(BaseModel):
 def _build_driver(settings: Settings) -> WireGuardDriver:
     if settings.wg_driver == "fake":
         return FakeWireGuardRunner()
-    # The native driver ships in milestone 5; selecting it before then is a
-    # deployment misconfiguration, not a request the agent can serve.
-    raise NotImplementedError("the native WireGuard driver is not available yet")
+    store = ConfigStore(settings.wg_state_dir, settings.wg_interface)
+    return NativeWireGuardDriver(settings, store)
 
 
 def create_app(

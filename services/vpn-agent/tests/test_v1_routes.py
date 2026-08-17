@@ -56,7 +56,7 @@ def test_provision_device_returns_200_and_an_active_peer(client: TestClient) -> 
 
     assert response.status_code == 200
     assert response.json()["state"] == "active"
-    assert response.json()["applied_generation"] == 1
+    assert response.json()["applied_generation"] == 0
 
 
 def test_provision_device_rejects_a_malformed_public_key(client: TestClient) -> None:
@@ -125,7 +125,7 @@ def test_duplicate_idempotency_key_replays_instead_of_reapplying(client: TestCli
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json() == second.json()
-    assert second.json()["applied_generation"] == 1
+    assert second.json()["applied_generation"] == 0
 
 
 def test_reused_idempotency_key_for_a_different_target_is_rejected(client: TestClient) -> None:

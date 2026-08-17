@@ -25,6 +25,11 @@ class RenderedPeer:
     public_key: str
     assigned_address: IPAddress
     persistent_keepalive_seconds: int | None = None
+    # The desired_generation of the request that last successfully applied
+    # this peer -- persisted as a comment (see render_wireguard_config) so a
+    # restarted agent can still answer "what generation is this peer at"
+    # from the last-known-good file alone.
+    generation: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +67,10 @@ def render_wireguard_config(desired: DesiredInterfaceState) -> str:
         lines.append(f"AllowedIPs = {_host_cidr(peer.assigned_address)}")
         if peer.persistent_keepalive_seconds is not None:
             lines.append(f"PersistentKeepalive = {peer.persistent_keepalive_seconds}")
+        # A comment, not a real wg-config directive -- ignored by both
+        # `wg-quick strip` and `wg syncconf`, which only parse [Interface]/
+        # [Peer] key = value lines.
+        lines.append(f"# Generation = {peer.generation}")
         lines.append("")
     return "\n".join(lines)
 
@@ -75,20 +84,23 @@ def parse_wireguard_config(text: str) -> DesiredInterfaceState:
     public_key: str | None = None
     address: IPAddress | None = None
     keepalive: int | None = None
+    generation = 0
 
     def flush() -> None:
-        nonlocal public_key, address, keepalive
+        nonlocal public_key, address, keepalive, generation
         if public_key is not None and address is not None:
             peers.append(
                 RenderedPeer(
                     public_key=public_key,
                     assigned_address=address,
                     persistent_keepalive_seconds=keepalive,
+                    generation=generation,
                 )
             )
         public_key = None
         address = None
         keepalive = None
+        generation = 0
 
     for raw_line in text.splitlines():
         line = raw_line.strip()
@@ -97,7 +109,11 @@ def parse_wireguard_config(text: str) -> DesiredInterfaceState:
         if line == "[Peer]":
             flush()
             continue
-        if "=" not in line:
+        if line.startswith("# Generation"):
+            _, _, value = line.partition("=")
+            generation = int(value.strip())
+            continue
+        if line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
         key = key.strip()

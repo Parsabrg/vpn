@@ -39,8 +39,38 @@ async def test_provision_device_activates_a_peer() -> None:
     response = await driver.provision_device(_provision_request())
 
     assert response.state == "active"
-    assert response.applied_generation == 1
+    assert response.applied_generation == 0
     assert response.error_code is None
+
+
+@pytest.mark.anyio
+async def test_applied_generation_echoes_the_requests_desired_generation() -> None:
+    driver = FakeWireGuardRunner()
+    response = await driver.provision_device(_provision_request(desired_generation=7))
+    assert response.applied_generation == 7
+
+
+@pytest.mark.anyio
+async def test_failed_apply_reports_the_peers_last_successfully_applied_generation() -> None:
+    driver = FakeWireGuardRunner()
+    await driver.provision_device(_provision_request(desired_generation=3))
+
+    driver.fail_next_apply()
+    response = await driver.provision_device(_provision_request(desired_generation=4))
+
+    assert response.state == "failed"
+    assert response.applied_generation == 3
+
+
+@pytest.mark.anyio
+async def test_failed_apply_for_a_never_applied_peer_reports_generation_zero() -> None:
+    driver = FakeWireGuardRunner()
+    driver.fail_next_apply()
+
+    response = await driver.provision_device(_provision_request(desired_generation=4))
+
+    assert response.state == "failed"
+    assert response.applied_generation == 0
 
 
 @pytest.mark.anyio

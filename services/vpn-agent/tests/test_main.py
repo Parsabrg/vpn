@@ -1,6 +1,6 @@
-import pytest
 from fastapi.testclient import TestClient
 
+from nebula_agent.drivers.wireguard import NativeWireGuardDriver
 from nebula_agent.main import create_app
 from nebula_agent.settings import Settings
 
@@ -41,6 +41,6 @@ def test_agent_exposes_only_the_allowlisted_operation_surface() -> None:
     }
 
 
-def test_selecting_the_native_driver_is_not_yet_available() -> None:
-    with pytest.raises(NotImplementedError, match="native WireGuard driver"):
-        create_app(Settings(env="test", wg_driver="native"))
+def test_selecting_the_native_driver_builds_a_native_driver_instance() -> None:
+    app = create_app(Settings(env="test", wg_driver="native"))
+    assert isinstance(app.state.driver, NativeWireGuardDriver)
