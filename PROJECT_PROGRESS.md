@@ -1,12 +1,17 @@
 # Project progress
 
-Last updated: 2026-08-16
+Last updated: 2026-08-17
 
 ## Current phase
 
-Phase 1.5 — administrator dashboard, implemented for review. Phase 1.1 was
-squash-merged in pull request #2, Phase 1.2 in pull request #5, Phase 1.3 in
-pull request #10, and Phase 1.4 in pull request #24.
+Phase 1.6a — VPN agent (typed API, native WireGuard driver, host hardening),
+implemented for review. Phase 1.1 was squash-merged in pull request #2,
+Phase 1.2 in pull request #5, Phase 1.3 in pull request #10, Phase 1.4 in
+pull request #24, and Phase 1.5 in pull request #28. Phase 1.6 is split into
+1.6a (this pass: `services/vpn-agent` only) and a follow-on 1.6b
+(`services/api`: agent client, provisioning orchestration, address allocator,
+reconciliation job, CLI seeding) along the natural agent/control-plane
+boundary.
 
 ## Completed
 
@@ -99,6 +104,22 @@ pull request #10, and Phase 1.4 in pull request #24.
   tables with a card breakpoint, dialogs, pagination) and test coverage across
   loading, empty, error, forbidden, expired-session, keyboard, reduced-motion,
   and responsive states.
+- Replaced the Phase 1.1 VPN-agent probe-only scaffold with a typed
+  `/v1/operations/{provision,revoke,enable,disable}-device`, `/health`,
+  `/reconcile` API, a `WireGuardDriver` protocol with two implementations
+  (an in-memory `FakeWireGuardRunner` used everywhere except real
+  deployment, and a `NativeWireGuardDriver` driving real `wg`/`wg-quick`
+  subprocess calls -- fixed argv only, never a shell), atomic apply with
+  rollback to a last-known-good on-disk config, and a local idempotency
+  ledger so retried requests replay instead of re-applying.
+- Added mTLS termination directly in uvicorn (`nebula_agent.serve`), a
+  hardened systemd unit implementing every threat-model "agent hardening"
+  checklist line, and a CI job that creates a real (namespaced) kernel
+  WireGuard interface to exercise the native driver end to end -- separate
+  from the containerized `checks` job since it needs real `CAP_NET_ADMIN`.
+  The Compose `vpn-agent:` service still only ever runs the capability-free
+  fake driver, unchanged from Phase 1.1's "no network-administration
+  capability" scaffold design.
 
 ## Validation recorded locally
 
@@ -109,7 +130,13 @@ pull request #10, and Phase 1.4 in pull request #24.
   locally and run in CI.
 - Worker: Ruff, format, and strict mypy across 19 source/test files pass. The suite
   collects 49 tests and remains above the 95% branch-coverage gate (96.3%).
-- VPN agent: Ruff, format, strict mypy, 7 pytest tests, and 96% branch coverage pass.
+- VPN agent: Ruff, format, strict mypy, 122 pytest tests, and 98% branch
+  coverage pass. `NativeWireGuardDriver`'s subprocess calls are exercised
+  through a mocked `run_fixed_argv` boundary locally; the one real-kernel
+  netns integration test is gated (`NEBULA_WG_NETNS_INTEGRATION`) and skips
+  locally, same shape as the Postgres-gated API tests -- there is no root
+  access, WireGuard kernel module, or `wg`/`wg-quick` tooling on this
+  Windows development machine to run it directly.
 - Admin: Prettier, ESLint, strict TypeScript, 32 Vitest tests, and the production
   build pass with `NEBULA_API_INTERNAL_URL`/`NEBULA_ADMIN_ORIGIN` set (now required
   at build time so Next's static/dynamic bailout can reach the `cookies()` call
@@ -127,7 +154,11 @@ pull request #10, and Phase 1.4 in pull request #24.
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
 widget tests, image builds, the container health smoke test, the real PostgreSQL
 migration/permission round trip, and the new account-request concurrency test
-therefore remain CI gates rather than locally verified claims.
+therefore remain CI gates rather than locally verified claims. The same is true of
+the new `netns-integration` CI job: whether a GitHub-hosted `ubuntu-latest` runner's
+kernel actually supports creating a WireGuard interface is unverified from here --
+the job is written to warn and skip gracefully rather than fail if it doesn't,
+pending a few real CI runs to confirm reliability before tightening that to fail-loud.
 
 ## External inputs pending
 
@@ -139,22 +170,41 @@ therefore remain CI gates rather than locally verified claims.
 
 ## Next milestone
 
-- Review and merge the Phase 1.5 administrator dashboard after all CI checks pass.
-- Generate Android and Windows host projects after support versions are confirmed.
-- Begin Phase 1.6 VPN server and protocol-profile provisioning, which the
-  permissions, assignments, and server-health admin pages are already wired to
-  read from once it exists.
+- Review and merge the Phase 1.6a VPN agent after all CI checks pass,
+  including confirming the new `netns-integration` job actually runs its
+  real assertions (not just the warn-and-skip fallback) on GitHub-hosted
+  runners.
+- Begin Phase 1.6b: the `services/api` side of provisioning -- an mTLS
+  agent client, orchestration against `agent_operations`, the address
+  allocator, the reconciliation job, and a CLI seed command (matching
+  `seed_admin.py`'s pattern) for creating VPN servers and granting
+  permissions, since there is still no way to create a `vpn_servers` row
+  without raw SQL.
+- Generate Android and Windows host projects after support versions are
+  confirmed.
 
 ## Known limitations
 
 - Account request, approval, activation, outbox email delivery, and an
-  administrator dashboard to review and act on all of it now exist, but VPN
-  provisioning, WireGuard/Xray runtime integration, native tunnel integration,
-  backup, or production deployment does not exist yet.
+  administrator dashboard to review and act on all of it now exist. The VPN
+  agent can now provision/revoke/enable/disable a real WireGuard peer and
+  report health/reconciliation against a real interface, but nothing on the
+  control-plane side calls it yet -- there is no agent client, no
+  provisioning orchestration, no address allocator, and no reconciliation
+  job (all Phase 1.6b). Xray runtime integration, native client tunnel
+  integration, backup, and production deployment do not exist yet either.
+- There is still no way to create a `vpn_servers` row, grant a protocol
+  permission, or assign a user to a server without raw SQL -- Phase 1.6b
+  adds a CLI seed command for this, by design rather than new admin
+  dashboard mutation UI this round.
 - The administrator dashboard's permissions, assignments, and server-health pages
   are honest empty-state shells: no VPN server or protocol profile has ever been
   created, and permissions/assignments have no backend API at all yet, both by
-  design until Phase 1.6.
+  design until Phase 1.6b.
+- The VPN agent's real driver is only exercised by the gated CI netns job and
+  (once deployed) the systemd unit in `services/vpn-agent/deploy/` -- it never
+  runs in this repository's Docker/Compose stack, which stays on the
+  capability-free fake driver by design.
 - The worker's SMTP/Resend adapters are exercised against Mailpit and mocked
   transports; no production email provider credentials have been configured or
   verified end-to-end yet.
