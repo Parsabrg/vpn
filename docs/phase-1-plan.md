@@ -117,6 +117,57 @@ the later milestone without changing the public control-plane contract.
 
 No endpoint accepts shell text or arbitrary configuration fragments.
 
+### Phase 1.6a / 1.6b split
+
+Phase 1.6 shipped as two PRs along the natural agent/control-plane boundary.
+**1.6a** (`services/vpn-agent` only) is complete: the typed agent API, the
+`WireGuardDriver` protocol, `FakeWireGuardRunner`, `NativeWireGuardDriver`,
+mTLS termination, host hardening (systemd unit, `services/vpn-agent/deploy/`),
+and the gated CI network-namespace integration test. **1.6b**
+(`services/api` only, not yet built) is everything on the control-plane
+side: an mTLS agent client, provisioning orchestration against
+`agent_operations`, the address allocator, the reconciliation job, and a CLI
+seed command for creating VPN servers and granting permissions.
+
+The exact contract 1.6b's agent client must honor, so it doesn't have to
+re-derive this from `services/vpn-agent`'s source:
+
+- Six typed operations, one route each, all `POST`:
+  `/v1/operations/provision-device`, `/revoke-device`, `/enable-device`,
+  `/disable-device`, `/health`, `/reconcile`. Request/response shapes are
+  defined in `services/vpn-agent/src/nebula_agent/drivers/base.py`.
+- Every mutating request (`provision_device`/`revoke_device`/`enable_device`/
+  `disable_device`) requires `idempotency_key: UUID`, `correlation_id: UUID`,
+  and `desired_generation: int`. A retried request with the same
+  `idempotency_key` against the same `(operation_kind, target_id)` gets the
+  agent's stored response replayed, not re-applied; against a *different*
+  target it is rejected `409`. `health`/`reconcile` take no idempotency key
+  (read-only, never ledgered).
+- `applied_generation` in every mutation response echoes the request's
+  `desired_generation` on success, or the target's last-successfully-applied
+  generation on failure (`0` if it was never successfully applied) --
+  callers should treat this as authoritative for updating
+  `wireguard_peers.applied_generation`, not assume success implies the
+  request's own `desired_generation` blindly (it does, but the field is
+  there so a failure path is equally unambiguous).
+- `ProvisionDeviceResponse` carries every field a client profile needs
+  (`server_public_key`, `listen_port`, `public_endpoint`, `client_dns`,
+  `client_allowed_ips`, `persistent_keepalive_seconds`) -- there is no
+  separate `get_client_profile` operation.
+- The connection must present a client certificate; the agent's own
+  `ssl_cert_reqs=CERT_REQUIRED` listener rejects the TLS handshake
+  otherwise. There is no additional bearer-token or header-based auth layer
+  on top of mTLS.
+- `reconcile`'s `outcome` is only ever `in_sync`, `drift_detected`, or
+  `ambiguous` from the agent -- `repair_requested`/`repair_succeeded`/
+  `repair_failed` are 1.6b's own reconciliation-job vocabulary, produced
+  after deciding what to do about a `drift_detected`/`ambiguous` result, not
+  something the agent itself reports.
+- The agent validates that `assigned_address` falls inside its own
+  configured `wg_client_pool`; 1.6b's address allocator must never hand out
+  an address that isn't actually inside the target server's pool, or every
+  `provision_device`/`enable_device` call for that peer will fail.
+
 ## Phase 1.7 — Flutter foundation and account lifecycle
 
 Build Material 3 tokens, light/dark/system themes, Riverpod state, GoRouter routes,

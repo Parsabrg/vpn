@@ -9,10 +9,14 @@ description = "Nebula VPN host agent with an allowlisted operation surface"
 readme = "README.md"
 requires-python = ">=3.12,<3.15"
 dependencies = [
+  "anyio==4.14.2",
   "fastapi==0.139.2",
   "pydantic-settings==2.14.2",
   "uvicorn[standard]==0.51.0",
 ]
+
+[project.scripts]
+nebula-agent-serve = "nebula_agent.serve:main"
 
 [project.optional-dependencies]
 dev = [
@@ -46,6 +50,9 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=nebula_agent --cov-report=term-missing --cov-fail-under=95"
 testpaths = ["tests"]
+markers = [
+  "netns_integration: requires root and a real WireGuard-capable kernel; run via the netns-integration CI job, never locally",
+]
 
 [tool.coverage.run]
 branch = true

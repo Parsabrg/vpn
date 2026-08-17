@@ -130,10 +130,13 @@ The full classification and delivery order are in
 
 ## Provisioning model
 
-All drivers implement typed operations such as `provision_device`, `revoke_device`,
-`enable_device`, `get_client_profile`, `health`, and `reconcile`. The API never sends
-shell text, binary paths, or raw Xray JSON. Idempotency and desired/actual state are
-shared, while protocol-specific validation stays in the driver.
+All drivers implement six typed operations: `provision_device`, `revoke_device`,
+`enable_device`, `disable_device`, `health`, and `reconcile`. There is no separate
+`get_client_profile` operation; the fields a client profile needs (server public key,
+listen port, public endpoint, DNS, allowed IPs, keepalive) ride on `provision_device`'s
+response instead. The API never sends shell text, binary paths, or raw Xray JSON.
+Idempotency and desired/actual state are shared, while protocol-specific validation
+stays in the driver.
 
 Provisioning is an explicit state machine:
 

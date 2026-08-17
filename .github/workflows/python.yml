@@ -100,3 +100,70 @@ jobs:
       - name: Test worker
         working-directory: services/worker
         run: python -m pytest
+
+  netns-integration:
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Install WireGuard userspace tools
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools
+      - name: Install VPN agent
+        # ubuntu-latest's system Python is externally managed (PEP 668); a
+        # venv is required here since this job (unlike `checks`) doesn't run
+        # inside the python:3.14.6 container image.
+        run: |
+          python3 -m venv services/vpn-agent/.venv
+          services/vpn-agent/.venv/bin/pip install -e './services/vpn-agent[dev]'
+      - name: Provision an isolated netns WireGuard interface
+        id: netns
+        run: |
+          set -eu
+          ns="nebula-ci-$$"
+
+          if ! sudo ip netns add "$ns" 2>/tmp/netns-add.log; then
+            echo "::warning::could not create a network namespace ($(cat /tmp/netns-add.log)); skipping real WireGuard integration tests"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! sudo ip netns exec "$ns" ip link add wg0 type wireguard 2>/tmp/wg-add.log; then
+            echo "::warning::this runner's kernel does not support WireGuard interfaces ($(cat /tmp/wg-add.log)); skipping real WireGuard integration tests"
+            sudo ip netns del "$ns" || true
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sudo ip netns exec "$ns" ip link set lo up
+          sudo ip netns exec "$ns" ip address add 10.77.0.1/24 dev wg0
+          sudo ip netns exec "$ns" ip link set wg0 up
+
+          key_dir=$(mktemp -d)
+          umask 077
+          wg genkey > "$key_dir/server_private_key"
+          sudo ip netns exec "$ns" wg set wg0 listen-port 51820 private-key "$key_dir/server_private_key"
+          sudo chmod 0644 "$key_dir/server_private_key"
+
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+          echo "key_file=$key_dir/server_private_key" >> "$GITHUB_OUTPUT"
+      - name: Real WireGuard netns integration tests
+        if: steps.netns.outputs.available == 'true'
+        working-directory: services/vpn-agent
+        env:
+          NEBULA_WG_NETNS_INTEGRATION: "1"
+          NEBULA_ENV: test
+          NEBULA_WG_DRIVER: native
+          NEBULA_WG_INTERFACE: wg0
+          NEBULA_WG_SERVER_ADDRESS: 10.77.0.1/24
+          NEBULA_WG_CLIENT_POOL: 10.77.0.0/24
+          NEBULA_WG_SERVER_PRIVATE_KEY_FILE: ${{ steps.netns.outputs.key_file }}
+        run: >-
+          sudo --preserve-env
+          ip netns exec ${{ steps.netns.outputs.namespace }}
+          "${{ github.workspace }}/services/vpn-agent/.venv/bin/python3" -m pytest
+          tests/integration -m netns_integration --no-cov
+      - name: Tear down the namespace
+        if: always() && steps.netns.outputs.namespace != ''
+        run: sudo ip netns del "${{ steps.netns.outputs.namespace }}" || true

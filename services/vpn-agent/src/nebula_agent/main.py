@@ -8,6 +8,13 @@ from fastapi import FastAPI, Request, Response, status
 from pydantic import BaseModel, ConfigDict
 
 from nebula_agent import __version__
+from nebula_agent.api.v1 import router as operations_router
+from nebula_agent.drivers.base import WireGuardDriver
+from nebula_agent.drivers.config_store import ConfigStore
+from nebula_agent.drivers.errors import DriverError
+from nebula_agent.drivers.fake import FakeWireGuardRunner
+from nebula_agent.drivers.wireguard import NativeWireGuardDriver
+from nebula_agent.ledger import OperationLedger
 from nebula_agent.settings import Settings, get_settings
 
 
@@ -21,10 +28,27 @@ class ProbeResponse(BaseModel):
     version: str = __version__
 
 
-def create_app(settings_: Settings | None = None) -> FastAPI:
+def _build_driver(settings: Settings) -> WireGuardDriver:
+    if settings.wg_driver == "fake":
+        return FakeWireGuardRunner()
+    store = ConfigStore(settings.wg_state_dir, settings.wg_interface)
+    return NativeWireGuardDriver(settings, store)
+
+
+def create_app(
+    settings_: Settings | None = None,
+    *,
+    driver: WireGuardDriver | None = None,
+    ledger: OperationLedger | None = None,
+) -> FastAPI:
     """Build the agent without any free-form command or configuration routes."""
 
     runtime_settings = settings_ or get_settings()
+    runtime_driver = driver or _build_driver(runtime_settings)
+    runtime_ledger = ledger or OperationLedger(
+        runtime_settings.operation_ledger_file,
+        runtime_settings.operation_ledger_max_entries,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -42,6 +66,14 @@ def create_app(settings_: Settings | None = None) -> FastAPI:
     )
     application.state.ready = False
     application.state.settings = runtime_settings
+    application.state.driver = runtime_driver
+    application.state.ledger = runtime_ledger
+
+    @application.exception_handler(DriverError)
+    async def _handle_driver_error(_request: Request, _error: DriverError) -> Response:
+        return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    application.include_router(operations_router)
 
     @application.get("/healthz", response_model=ProbeResponse, tags=["probes"])
     async def health() -> ProbeResponse:

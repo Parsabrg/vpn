@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
-from starlette.routing import Route
 
+from nebula_agent.drivers.wireguard import NativeWireGuardDriver
 from nebula_agent.main import create_app
 from nebula_agent.settings import Settings
 
@@ -25,8 +25,22 @@ def test_readiness_is_enabled_during_lifespan() -> None:
     assert response.json()["status"] == "ready"
 
 
-def test_agent_exposes_only_probe_routes() -> None:
+def test_agent_exposes_only_the_allowlisted_operation_surface() -> None:
     app = create_app(Settings(env="test"))
-    application_paths = {route.path for route in app.routes if isinstance(route, Route)}
+    application_paths = set(app.openapi()["paths"].keys())
 
-    assert application_paths == {"/healthz", "/readyz"}
+    assert application_paths == {
+        "/healthz",
+        "/readyz",
+        "/v1/operations/provision-device",
+        "/v1/operations/revoke-device",
+        "/v1/operations/enable-device",
+        "/v1/operations/disable-device",
+        "/v1/operations/health",
+        "/v1/operations/reconcile",
+    }
+
+
+def test_selecting_the_native_driver_builds_a_native_driver_instance() -> None:
+    app = create_app(Settings(env="test", wg_driver="native"))
+    assert isinstance(app.state.driver, NativeWireGuardDriver)

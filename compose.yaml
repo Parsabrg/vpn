@@ -79,6 +79,13 @@ services:
       NEBULA_LOG_LEVEL: INFO
       NEBULA_WG_INTERFACE: wg0
       NEBULA_WG_SERVER_PRIVATE_KEY_FILE: /run/nebula-mock/wireguard_server_private_key
+      # Always the capability-free mock driver here -- see services/vpn-agent/README.md
+      # for why the real driver never runs in this container. State/ledger
+      # paths are redirected under /tmp since the container filesystem is
+      # otherwise read-only.
+      NEBULA_WG_DRIVER: fake
+      NEBULA_WG_STATE_DIR: /tmp/nebula/wireguard
+      NEBULA_OPERATION_LEDGER_FILE: /tmp/nebula/wireguard/operation_ledger.jsonl
       NEBULA_XRAY_ENABLED: "false"
       NEBULA_XRAY_BINARY: /usr/local/bin/xray
       NEBULA_XRAY_CONFIG_DIR: /tmp/nebula/xray
