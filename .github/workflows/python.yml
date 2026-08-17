@@ -64,42 +64,67 @@ jobs:
     steps:
       # actions/checkout v7.0.0
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      # One virtualenv per service, mirroring how they are developed locally.
+      # A single shared environment cannot work: the services deliberately do
+      # not import each other, and each pins its runtime dependencies exactly,
+      # so any Dependabot bump that moves a shared pin (fastapi, uvicorn) in
+      # one service's pyproject makes pip's resolver fail outright -- which
+      # deadlocked every grouped dependency PR, since no single PR can bump
+      # the same pin in two services at once.
       - name: Install workspaces
-        run: >-
-          python -m pip install
-          -e './services/api[dev]' -e './services/vpn-agent[dev]' -e './services/worker[dev]'
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            python -m venv "services/$service/.venv"
+            "services/$service/.venv/bin/python" -m pip install --upgrade pip
+            "services/$service/.venv/bin/python" -m pip install -e "./services/$service[dev]"
+          done
       - name: Create least-privilege database roles
-        run: python infrastructure/postgres/bootstrap_ci_roles.py
+        run: services/api/.venv/bin/python infrastructure/postgres/bootstrap_ci_roles.py
       - name: Upgrade database from empty to head
         working-directory: services/api
-        run: python -m alembic upgrade head
+        run: .venv/bin/python -m alembic upgrade head
       - name: Verify migration metadata is current
         working-directory: services/api
-        run: python -m alembic check
-      - name: Audit Python dependency graph
-        run: python -m pip_audit
+        run: .venv/bin/python -m alembic check
+      # Audited per service now rather than once over a merged environment,
+      # so a finding names the service that actually owns the dependency.
+      - name: Audit Python dependency graphs
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            (cd "services/$service" && .venv/bin/python -m pip_audit)
+          done
       - name: Ruff lint
-        run: python -m ruff check services/api services/vpn-agent services/worker
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            (cd "services/$service" && .venv/bin/python -m ruff check .)
+          done
       - name: Ruff format
-        run: python -m ruff format --check services/api services/vpn-agent services/worker
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            (cd "services/$service" && .venv/bin/python -m ruff format --check .)
+          done
       - name: Type check API
         working-directory: services/api
-        run: python -m mypy
+        run: .venv/bin/python -m mypy
       - name: Type check VPN agent
         working-directory: services/vpn-agent
-        run: python -m mypy
+        run: .venv/bin/python -m mypy
       - name: Type check worker
         working-directory: services/worker
-        run: python -m mypy
+        run: .venv/bin/python -m mypy
       - name: Test API
         working-directory: services/api
-        run: python -m pytest
+        run: .venv/bin/python -m pytest
       - name: Test VPN agent
         working-directory: services/vpn-agent
-        run: python -m pytest
+        run: .venv/bin/python -m pytest
       - name: Test worker
         working-directory: services/worker
-        run: python -m pytest
+        run: .venv/bin/python -m pytest
 
   netns-integration:
     needs: checks
@@ -110,9 +135,9 @@ jobs:
       - name: Install WireGuard userspace tools
         run: sudo apt-get update && sudo apt-get install -y wireguard-tools
       - name: Install VPN agent
-        # ubuntu-latest's system Python is externally managed (PEP 668); a
-        # venv is required here since this job (unlike `checks`) doesn't run
-        # inside the python:3.14.6 container image.
+        # ubuntu-latest's system Python is externally managed (PEP 668), so a
+        # venv is required regardless; `checks` now uses per-service venvs too,
+        # so both jobs install the agent the same way.
         run: |
           python3 -m venv services/vpn-agent/.venv
           services/vpn-agent/.venv/bin/pip install -e './services/vpn-agent[dev]'
