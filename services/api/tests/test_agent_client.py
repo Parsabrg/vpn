@@ -15,9 +15,12 @@ from nebula_api.agent_client.client import (
     AgentUnreachable,
 )
 from nebula_api.agent_client.models import (
+    DisableDeviceRequest,
+    EnableDeviceRequest,
     HealthRequest,
     ProvisionDeviceRequest,
     ReconcileRequest,
+    RevokeDeviceRequest,
 )
 from nebula_api.settings import Settings
 
@@ -362,5 +365,122 @@ def test_using_the_client_outside_the_context_manager_raises() -> None:
         )
         with pytest.raises(AgentClientError, match="async context manager"):
             await client.health(HealthRequest(correlation_id=uuid4()))
+
+    asyncio.run(scenario())
+
+
+def test_revoke_device_sends_the_correct_path_and_parses_the_response() -> None:
+    """Covered here rather than only through ProvisioningService, whose tests
+    use a fake client -- a wrong URL or response model on this path would
+    otherwise not surface until a real agent call."""
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/operations/revoke-device"
+        return httpx.Response(
+            200,
+            json={
+                "state": "revoked",
+                "applied_generation": 2,
+                "revoked_at": "2026-01-01T00:00:00Z",
+            },
+        )
+
+    async def scenario() -> None:
+        client = AgentClient(
+            agent_host="vpn1.internal",
+            agent_port=9443,
+            settings=Settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        request = RevokeDeviceRequest(
+            idempotency_key=uuid4(),
+            correlation_id=uuid4(),
+            target_kind="wireguard_peer",
+            target_id=uuid4(),
+            public_key=VALID_PUBLIC_KEY,
+            desired_generation=2,
+        )
+        async with client:
+            response = await client.revoke_device(request)
+        assert response.state == "revoked"
+        assert response.applied_generation == 2
+
+    asyncio.run(scenario())
+
+
+def test_enable_device_sends_the_correct_path_and_parses_the_response() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/operations/enable-device"
+        return httpx.Response(200, json={"state": "enabled", "applied_generation": 3})
+
+    async def scenario() -> None:
+        client = AgentClient(
+            agent_host="vpn1.internal",
+            agent_port=9443,
+            settings=Settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        request = EnableDeviceRequest(
+            idempotency_key=uuid4(),
+            correlation_id=uuid4(),
+            target_kind="wireguard_peer",
+            target_id=uuid4(),
+            public_key=VALID_PUBLIC_KEY,
+            assigned_address="10.77.0.2",
+            desired_generation=3,
+        )
+        async with client:
+            response = await client.enable_device(request)
+        assert response.state == "enabled"
+        assert response.applied_generation == 3
+
+    asyncio.run(scenario())
+
+
+def test_disable_device_sends_the_correct_path_and_parses_the_response() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/operations/disable-device"
+        return httpx.Response(200, json={"state": "disabled", "applied_generation": 4})
+
+    async def scenario() -> None:
+        client = AgentClient(
+            agent_host="vpn1.internal",
+            agent_port=9443,
+            settings=Settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        request = DisableDeviceRequest(
+            idempotency_key=uuid4(),
+            correlation_id=uuid4(),
+            target_kind="wireguard_peer",
+            target_id=uuid4(),
+            public_key=VALID_PUBLIC_KEY,
+            desired_generation=4,
+        )
+        async with client:
+            response = await client.disable_device(request)
+        assert response.state == "disabled"
+
+    asyncio.run(scenario())
+
+
+def test_an_unclassified_request_error_is_treated_as_ambiguous() -> None:
+    """The catch-all deliberately errs toward ambiguous: for any transport
+    failure not known to have happened before the request was sent, we cannot
+    prove the agent did not apply it, so it must not be marked failed."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.LocalProtocolError("malformed request state")
+
+    async def scenario() -> None:
+        client = AgentClient(
+            agent_host="vpn1.internal",
+            agent_port=9443,
+            settings=Settings(),
+            transport=httpx.MockTransport(handler),
+        )
+        async with client:
+            with pytest.raises(AgentResponseAmbiguous):
+                await client.provision_device(_provision_request())
 
     asyncio.run(scenario())
