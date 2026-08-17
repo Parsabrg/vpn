@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     agent_client_key_file: Path | None = None
     agent_trusted_ca_file: Path | None = None
     agent_request_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+    reconciliation_batch_size: int = Field(default=500, ge=1, le=5_000)
 
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=3_600)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)

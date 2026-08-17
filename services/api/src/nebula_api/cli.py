@@ -10,7 +10,9 @@ from typing import NoReturn
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from nebula_api.agent_client.client import AgentClient
 from nebula_api.db.engine import create_database_engine, create_session_factory
+from nebula_api.provisioning.reconciliation import run_reconciliation
 from nebula_api.seed_admin import SeedAdminStatus, seed_initial_admin
 from nebula_api.settings import Settings
 from nebula_api.topology_seed import (
@@ -63,6 +65,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     grant_access.add_argument("--user-email", required=True)
     grant_access.add_argument("--server-code", required=True)
+
+    commands.add_parser(
+        "reconcile-wireguard",
+        help="one-shot reconciliation of WireGuard peers against every active agent",
+    )
 
     return parser
 
@@ -173,6 +180,28 @@ async def run_grant_user_access(*, user_email: str, server_code: str) -> int:
     return 0
 
 
+async def run_reconcile_wireguard() -> int:
+    settings = Settings()
+    engine = _build_engine(settings)
+    try:
+        summary = await run_reconciliation(
+            create_session_factory(engine),
+            lambda agent_host, agent_port: AgentClient(
+                agent_host=agent_host, agent_port=agent_port, settings=settings
+            ),
+            settings,
+        )
+    finally:
+        await engine.dispose()
+
+    print(
+        f"Reconciled {summary.checked} peer(s): {summary.in_sync} in sync, "
+        f"{summary.repaired} repaired, {summary.repair_failed} repair(s) failed, "
+        f"{summary.ambiguous} ambiguous."
+    )
+    return 1 if summary.had_problems else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Parse and execute an operator command."""
 
@@ -211,6 +240,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     server_code=arguments.server_code,
                 )
             )
+        if arguments.command == "reconcile-wireguard":
+            return asyncio.run(run_reconcile_wireguard())
     except SQLAlchemyError:
         parser.error("database operation failed; no changes were confirmed")
     except (RuntimeError, ValueError) as error:
