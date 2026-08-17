@@ -72,6 +72,16 @@ class Settings(BaseSettings):
         "/run/nebula-secrets/agent_trusted_client_ca"
     )
 
+    # --- Listener binding ---
+    # 0.0.0.0 is the Compose/dev default: inside that container's own network
+    # namespace it is reachable only from sibling containers, never the host's
+    # public interface (compose.yaml publishes no ports for this service).
+    # The systemd unit (deploy/) overrides this to a loopback/private address,
+    # since a real host's 0.0.0.0 would bind every interface including public
+    # ones -- exactly what the threat model forbids.
+    agent_bind_host: str = "0.0.0.0"  # noqa: S104 - dev-safe default, see comment above
+    agent_bind_port: int = Field(default=9443, ge=1, le=65535)
+
     @field_validator("wg_interface")
     @classmethod
     def validate_interface(cls, value: str) -> str:

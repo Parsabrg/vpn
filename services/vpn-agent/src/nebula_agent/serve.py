@@ -15,9 +15,6 @@ import uvicorn
 from nebula_agent.main import create_app
 from nebula_agent.settings import Settings, get_settings
 
-_BIND_HOST = "0.0.0.0"  # noqa: S104 - container/host boundary is a Docker port map or firewall, not this bind address
-_BIND_PORT = 9443
-
 
 def build_uvicorn_config(settings: Settings) -> uvicorn.Config:
     """Builds the server configuration without binding a socket or reading
@@ -26,8 +23,8 @@ def build_uvicorn_config(settings: Settings) -> uvicorn.Config:
 
     return uvicorn.Config(
         create_app(settings),
-        host=_BIND_HOST,
-        port=_BIND_PORT,
+        host=settings.agent_bind_host,
+        port=settings.agent_bind_port,
         access_log=False,
         ssl_certfile=str(settings.agent_tls_cert_file),
         ssl_keyfile=str(settings.agent_tls_key_file),

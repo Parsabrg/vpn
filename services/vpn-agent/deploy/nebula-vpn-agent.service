@@ -1,0 +1,47 @@
+[Unit]
+Description=Nebula VPN agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nebula-agent
+Group=nebula-agent
+EnvironmentFile=/etc/nebula/agent.env
+
+# Only capability required to manage a WireGuard interface; everything else
+# is dropped by the empty-otherwise CapabilityBoundingSet.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+UMask=0077
+
+# Only the agent's own state directory is writable; secrets are read-only
+# even to this service.
+StateDirectory=nebula/wireguard
+ReadWritePaths=/var/lib/nebula/wireguard
+ReadOnlyPaths=/run/nebula-secrets
+
+ExecStart=/opt/nebula-vpn-agent/.venv/bin/nebula-agent-serve
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
