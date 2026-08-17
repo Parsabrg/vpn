@@ -146,15 +146,16 @@ control-plane side of Phase 1.6 that 1.6a left for a follow-on PR.
 
 ## Validation recorded locally
 
-- API: Ruff, format, and strict mypy pass. The suite collects 525 tests (6 skip
-  locally) and remains above the 95% branch-coverage gate (95.6%); the live
-  PostgreSQL tests (including the new provisioning-concurrency test), the
+- API: Ruff, format, and strict mypy pass. The suite collects 539 tests (7 skip
+  locally) and remains above the 95% branch-coverage gate (96.0%); the live
+  PostgreSQL tests (including the two new provisioning-concurrency tests), the
   real-Redis atomicity test, and the account-request/user-management
   concurrency tests skip when those services are not configured locally and
   run in CI.
 - Worker: Ruff, format, and strict mypy across 19 source/test files pass. The suite
-  collects 49 tests and remains above the 95% branch-coverage gate (96.3%).
-- VPN agent: Ruff, format, strict mypy, 122 pytest tests, and 98% branch
+  collects 54 tests and remains above the 95% branch-coverage gate (96.5%),
+  with `poller.py` at 100% after the lease-reclamation work.
+- VPN agent: Ruff, format, strict mypy, 126 pytest tests, and 98% branch
   coverage pass. `NativeWireGuardDriver`'s subprocess calls are exercised
   through a mocked `run_fixed_argv` boundary locally; the one real-kernel
   netns integration test is gated (`NEBULA_WG_NETNS_INTEGRATION`) and skips
