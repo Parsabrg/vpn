@@ -50,6 +50,9 @@ plugins = ["pydantic.mypy"]
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers --cov=nebula_agent --cov-report=term-missing --cov-fail-under=95"
 testpaths = ["tests"]
+markers = [
+  "netns_integration: requires root and a real WireGuard-capable kernel; run via the netns-integration CI job, never locally",
+]
 
 [tool.coverage.run]
 branch = true
