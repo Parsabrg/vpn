@@ -87,6 +87,10 @@ def test_concurrent_peer_requests_produce_exactly_one_active_peer() -> None:
     unique = uuid4().hex[:12]
     server_code = f"vps-{unique}"
     client_key = "E" * 43 + "="
+    # grant_user_server_access() runs this through normalize_email(), which
+    # rejects the reserved .test TLD -- unlike the other concurrency tests
+    # here, which only ever insert their addresses via raw SQL.
+    user_email = f"user-{unique}@example.com"
 
     async def scenario() -> tuple[int, int, int]:
         await seed_wireguard_protocol(session_factory)
@@ -110,7 +114,7 @@ def test_concurrent_peer_requests_produce_exactly_one_active_peer() -> None:
                     "activated_at) VALUES "
                     "(:id, :email, :email, 'concurrency-test-hash', 'active', 3, now())"
                 ),
-                {"id": user_id, "email": f"user-{unique}@example.test"},
+                {"id": user_id, "email": user_email},
             )
             await connection.execute(
                 text(
@@ -121,7 +125,7 @@ def test_concurrent_peer_requests_produce_exactly_one_active_peer() -> None:
             )
         await grant_user_server_access(
             session_factory,
-            user_email=f"user-{unique}@example.test",
+            user_email=user_email,
             server_code=server_code,
         )
 
