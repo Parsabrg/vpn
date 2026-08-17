@@ -24,7 +24,7 @@ from hashlib import sha256
 from ipaddress import ip_address, ip_network
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula_api.agent_client.client import (
@@ -188,7 +188,7 @@ class ProvisioningService:
                 raise ProvisioningRejected()
 
             profile = await self._require_wireguard_profile(session)
-            server = await self._require_active_server(session, server_code, profile.id)
+            server, capability = await self._require_active_server(session, server_code, profile.id)
             await self._require_permission(session, user_id, profile.id, now)
             await self._require_assignment(session, user_id, server.id, now)
 
@@ -201,6 +201,12 @@ class ProvisioningService:
             if existing_peer is not None:
                 raise DeviceAlreadyHasPeer()
 
+            # Both the capacity check and the address allocation must happen
+            # under this server's allocation lock: without it two concurrent
+            # requests could each observe the last free slot and overshoot the
+            # configured cap by one.
+            await self._lock_server_allocation(session, server.id)
+            await self._require_capacity(session, server, capability)
             address = await self._allocate_address(session, server)
 
             credential = DeviceProtocolCredential(
@@ -439,7 +445,7 @@ class ProvisioningService:
 
     async def _require_active_server(
         self, session: AsyncSession, server_code: str, profile_id: UUID
-    ) -> VPNServer:
+    ) -> tuple[VPNServer, ServerProtocolCapability]:
         server = await session.scalar(select(VPNServer).where(VPNServer.code == server_code))
         if server is None or server.state != ServerState.ACTIVE.value:
             raise ProvisioningRejected()
@@ -451,7 +457,39 @@ class ProvisioningService:
         )
         if capability is None or capability.state != CapabilityState.ENABLED.value:
             raise ProvisioningRejected()
-        return server
+        return server, capability
+
+    async def _require_capacity(
+        self,
+        session: AsyncSession,
+        server: VPNServer,
+        capability: ServerProtocolCapability,
+    ) -> None:
+        """Enforce the server's device cap and the capability's optional
+        per-protocol cap, whichever is lower.
+
+        Only live peers count: a revoked peer frees a device slot even though
+        its address stays burned by `uq_wireguard_peers_server_address`, so
+        capacity and address exhaustion are genuinely separate limits.
+        Callers must already hold this server's allocation lock.
+        """
+
+        live_peers = (
+            await session.scalar(
+                select(func.count())
+                .select_from(WireGuardPeer)
+                .where(
+                    WireGuardPeer.vpn_server_id == server.id,
+                    WireGuardPeer.state.in_(_LIVE_PEER_STATES),
+                )
+            )
+            or 0
+        )
+        effective_limit = server.maximum_devices
+        if capability.capacity_limit is not None:
+            effective_limit = min(effective_limit, capability.capacity_limit)
+        if live_peers >= effective_limit:
+            raise ProvisioningRejected()
 
     async def _require_permission(
         self, session: AsyncSession, user_id: UUID, profile_id: UUID, now: datetime
@@ -481,16 +519,26 @@ class ProvisioningService:
         if assignment.expires_at is not None and assignment.expires_at <= now:
             raise ProvisioningRejected()
 
-    async def _allocate_address(self, session: AsyncSession, server: VPNServer) -> IPAddress:
-        if server.wireguard_client_pool is None:
-            raise ProvisioningRejected()
+    async def _lock_server_allocation(self, session: AsyncSession, server_id: UUID) -> None:
+        """Serialize capacity checking and address allocation per server. The
+        address does not belong to any row until it is inserted, so there is
+        nothing to row-lock -- this advisory lock is what makes the
+        check-then-insert sequence safe. The 2-int overload namespaces it away
+        from seed_admin.py's lock."""
+
         await session.execute(
             text(
                 "SELECT pg_advisory_xact_lock("
                 "hashtext('nebula.wireguard_address_alloc'), hashtext(:server_id))"
             ),
-            {"server_id": str(server.id)},
+            {"server_id": str(server_id)},
         )
+
+    async def _allocate_address(self, session: AsyncSession, server: VPNServer) -> IPAddress:
+        """Callers must already hold this server's allocation lock."""
+
+        if server.wireguard_client_pool is None:
+            raise ProvisioningRejected()
         existing = (
             await session.scalars(
                 select(WireGuardPeer.assigned_address).where(

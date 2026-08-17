@@ -123,8 +123,8 @@ def _never_called_agent_builder() -> AgentClientBuilder:
     return _builder
 
 
-def _entity_of(statement: Select[Any]) -> type:
-    return cast(type, statement.column_descriptions[0]["entity"])
+def _entity_of(statement: Select[Any]) -> type | None:
+    return cast("type | None", statement.column_descriptions[0]["entity"])
 
 
 def _added(session: MagicMock, model: type) -> Any:
@@ -136,7 +136,10 @@ def _added(session: MagicMock, model: type) -> Any:
 
 
 def make_session(
-    fixtures: dict[type, object | None], *, existing_addresses: list[str] | None = None
+    fixtures: dict[type, object | None],
+    *,
+    existing_addresses: list[str] | None = None,
+    live_peer_count: int = 0,
 ) -> MagicMock:
     """A fake AsyncSession dispatching scalar() by queried entity type: a
     freshly `add()`-ed row of that type wins (most recent first), otherwise
@@ -166,6 +169,10 @@ def make_session(
 
     async def _scalar(statement: Select[Any]) -> object | None:
         entity = _entity_of(statement)
+        if entity is None:
+            # An aggregate (select(func.count())) has no entity -- the only
+            # one this service issues is the live-peer capacity count.
+            return live_peer_count
         for call in reversed(session.add.call_args_list):
             row = call.args[0]
             if isinstance(row, entity):
@@ -216,6 +223,7 @@ def _server(
     state: str = ServerState.ACTIVE.value,
     pool: str | None = "203.0.113.0/24",
     gateway: str | None = "203.0.113.1",
+    maximum_devices: int = 1000,
 ) -> MagicMock:
     server = MagicMock(spec=VPNServer)
     server.id = SERVER_ID
@@ -225,12 +233,16 @@ def _server(
     server.agent_port = 9443
     server.wireguard_client_pool = pool
     server.wireguard_gateway_address = gateway
+    server.maximum_devices = maximum_devices
     return server
 
 
-def _capability(*, state: str = CapabilityState.ENABLED.value) -> MagicMock:
+def _capability(
+    *, state: str = CapabilityState.ENABLED.value, capacity_limit: int | None = None
+) -> MagicMock:
     capability = MagicMock(spec=ServerProtocolCapability)
     capability.state = state
+    capability.capacity_limit = capacity_limit
     return capability
 
 
@@ -455,6 +467,48 @@ def test_request_peer_rejects_when_the_device_already_has_a_live_peer() -> None:
 
     with pytest.raises(DeviceAlreadyHasPeer):
         asyncio.run(_request_peer(service))
+
+
+def test_request_peer_rejects_when_the_server_device_cap_is_reached() -> None:
+    session = make_session(
+        _happy_fixtures({VPNServer: _server(maximum_devices=5)}), live_peer_count=5
+    )
+    service = make_service(session)
+
+    with pytest.raises(ProvisioningRejected):
+        asyncio.run(_request_peer(service))
+
+
+def test_request_peer_rejects_when_the_capability_capacity_limit_is_reached() -> None:
+    """The capability's optional per-protocol cap binds even when the
+    server-wide device cap still has room."""
+
+    session = make_session(
+        _happy_fixtures(
+            {
+                VPNServer: _server(maximum_devices=1000),
+                ServerProtocolCapability: _capability(capacity_limit=2),
+            }
+        ),
+        live_peer_count=2,
+    )
+    service = make_service(session)
+
+    with pytest.raises(ProvisioningRejected):
+        asyncio.run(_request_peer(service))
+
+
+def test_request_peer_allows_the_last_slot_under_the_cap() -> None:
+    session = make_session(
+        _happy_fixtures({VPNServer: _server(maximum_devices=5)}), live_peer_count=4
+    )
+    agent = FakeAgentClient(provision=_provision_response())
+    service = make_service(session, agent_builder=_agent_builder(agent))
+
+    result = asyncio.run(_request_peer(service))
+
+    assert result.peer_id is not None
+    assert len(agent.provision_calls) == 1
 
 
 def test_request_peer_rejects_when_the_address_pool_is_exhausted() -> None:

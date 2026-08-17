@@ -24,7 +24,11 @@ from nebula_api.agent_client.client import AgentClient, AgentClientBuilder
 from nebula_api.agent_client.models import ProvisionDeviceRequest, ProvisionDeviceResponse
 from nebula_api.auth.redis_state import RateBucket, RedisAuthState
 from nebula_api.db.engine import create_database_engine, create_session_factory
-from nebula_api.provisioning.service import DeviceAlreadyHasPeer, ProvisioningService
+from nebula_api.provisioning.service import (
+    DeviceAlreadyHasPeer,
+    ProvisioningRejected,
+    ProvisioningService,
+)
 from nebula_api.settings import Settings
 from nebula_api.topology_seed import (
     create_vpn_server,
@@ -216,3 +220,158 @@ def test_concurrent_peer_requests_produce_exactly_one_active_peer() -> None:
     assert successes == 1
     assert rejections == 1
     assert active_peer_count == 1
+
+
+@pytest.mark.skipif(
+    not os.environ.get("NEBULA_DATABASE_URL"), reason="PostgreSQL is not configured"
+)
+def test_concurrent_requests_cannot_overshoot_the_server_device_cap() -> None:
+    """Two *different* devices racing for a server's last free slot.
+
+    The per-device row lock does not help here -- both devices are distinct,
+    so only the per-server allocation advisory lock stops both requests from
+    observing the same free slot and exceeding maximum_devices.
+    """
+
+    database_url = os.environ["NEBULA_DATABASE_URL"]
+    engine = create_database_engine(database_url)
+    session_factory = create_session_factory(engine)
+    service = ProvisioningService(
+        session_factory,
+        cast(RedisAuthState, AlwaysAllowingRedis()),
+        Settings(env="test"),
+        _fake_agent_builder(),
+    )
+
+    user_id = uuid4()
+    first_device_id = uuid4()
+    second_device_id = uuid4()
+    unique = uuid4().hex[:12]
+    server_code = f"cap-{unique}"
+    user_email = f"capuser-{unique}@example.com"
+
+    async def scenario() -> tuple[int, int, int]:
+        await seed_wireguard_protocol(session_factory)
+        await create_vpn_server(
+            session_factory,
+            code=server_code,
+            display_name="Capacity Test VPS",
+            agent_host=f"{server_code}.internal",
+            agent_port=9443,
+            public_host=f"{server_code}.internal",
+            wireguard_client_pool="203.0.114.0/24",
+            wireguard_gateway_address="203.0.114.1",
+            maximum_devices=1,
+            state="active",
+        )
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, email, email_normalized, password_hash, state, device_limit, "
+                    "activated_at) VALUES "
+                    "(:id, :email, :email, 'capacity-test-hash', 'active', 5, now())"
+                ),
+                {"id": user_id, "email": user_email},
+            )
+            for device_id in (first_device_id, second_device_id):
+                await connection.execute(
+                    text(
+                        "INSERT INTO devices (id, user_id, name, platform, client_version) "
+                        "VALUES (:id, :user_id, 'capacity-test-device', 'android', '1.0.0')"
+                    ),
+                    {"id": device_id, "user_id": user_id},
+                )
+        await grant_user_server_access(
+            session_factory, user_email=user_email, server_code=server_code
+        )
+
+        try:
+            results = await asyncio.gather(
+                *(
+                    service.request_peer(
+                        user_id=user_id,
+                        device_id=device_id,
+                        server_code=server_code,
+                        public_key=key,
+                        network_prefix="203.0.113.0/24",
+                        request_id=uuid4(),
+                    )
+                    for device_id, key in (
+                        (first_device_id, "G" * 43 + "="),
+                        (second_device_id, "H" * 43 + "="),
+                    )
+                ),
+                return_exceptions=True,
+            )
+            successes = [item for item in results if not isinstance(item, BaseException)]
+            rejections = [item for item in results if isinstance(item, ProvisioningRejected)]
+            unexpected = [
+                item
+                for item in results
+                if isinstance(item, BaseException) and not isinstance(item, ProvisioningRejected)
+            ]
+            assert not unexpected, f"unexpected failures: {unexpected}"
+
+            async with engine.begin() as connection:
+                live_count = await connection.scalar(
+                    text(
+                        "SELECT count(*) FROM wireguard_peers p "
+                        "JOIN vpn_servers s ON s.id = p.vpn_server_id "
+                        "WHERE s.code = :code AND p.state IN "
+                        "('requested', 'applying', 'active', 'revoking')"
+                    ),
+                    {"code": server_code},
+                )
+            return len(successes), len(rejections), cast(int, live_count)
+        finally:
+            async with engine.begin() as connection:
+                server_id = await connection.scalar(
+                    text("SELECT id FROM vpn_servers WHERE code = :code"), {"code": server_code}
+                )
+                await connection.execute(
+                    text("DELETE FROM wireguard_peers WHERE vpn_server_id = :server_id"),
+                    {"server_id": server_id},
+                )
+                await connection.execute(
+                    text(
+                        "DELETE FROM device_protocol_credentials WHERE vpn_server_id = :server_id"
+                    ),
+                    {"server_id": server_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM agent_operations WHERE vpn_server_id = :server_id"),
+                    {"server_id": server_id},
+                )
+                await connection.execute(
+                    text(
+                        "DELETE FROM server_protocol_capabilities WHERE vpn_server_id = :server_id"
+                    ),
+                    {"server_id": server_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM user_protocol_permissions WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM user_server_assignments WHERE user_id = :user_id"),
+                    {"user_id": user_id},
+                )
+                await connection.execute(
+                    text("DELETE FROM devices WHERE user_id = :user_id"), {"user_id": user_id}
+                )
+                await connection.execute(
+                    text("DELETE FROM vpn_servers WHERE id = :server_id"), {"server_id": server_id}
+                )
+                await connection.execute(
+                    text("DELETE FROM users WHERE id = :user_id"), {"user_id": user_id}
+                )
+
+    try:
+        successes, rejections, live_count = asyncio.run(scenario())
+    finally:
+        asyncio.run(engine.dispose())
+
+    assert successes == 1
+    assert rejections == 1
+    assert live_count == 1
