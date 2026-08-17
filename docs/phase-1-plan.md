@@ -103,7 +103,7 @@ maps onto the audit vocabulary already defined in
 server-assignment mutation UI/API are intentionally out of scope until Phase 1.6
 gives them something real to act on.
 
-## Phase 1.6 — protocol-neutral VPN agent and WireGuard provisioning
+## Phase 1.6 — protocol-neutral VPN agent and WireGuard provisioning (complete)
 
 Implement the versioned mTLS agent API, typed command validation, operation
 idempotency, host hardening, address allocator, desired/actual state, atomic apply,
@@ -124,10 +124,23 @@ Phase 1.6 shipped as two PRs along the natural agent/control-plane boundary.
 `WireGuardDriver` protocol, `FakeWireGuardRunner`, `NativeWireGuardDriver`,
 mTLS termination, host hardening (systemd unit, `services/vpn-agent/deploy/`),
 and the gated CI network-namespace integration test. **1.6b**
-(`services/api` only, not yet built) is everything on the control-plane
-side: an mTLS agent client, provisioning orchestration against
-`agent_operations`, the address allocator, the reconciliation job, and a CLI
-seed command for creating VPN servers and granting permissions.
+(`services/api` only) is also complete: an mTLS `AgentClient`
+(`agent_client/`, one instance per VPN server, classifying every failure
+into `AgentUnreachable`/`AgentResponseAmbiguous`/`AgentRejected` so a lost
+response is never mistaken for a definite outcome), the pure address
+allocator (`provisioning/allocator.py`), `ProvisioningService`
+(`provisioning/service.py`) running `request_peer`/`revoke_peer` as three
+phases -- validate and write in-flight rows in one transaction, call the
+agent outside any transaction, finalize in a fresh transaction -- proven
+race-safe against real Postgres in `test_provisioning_concurrency.py`, the
+first user-facing WireGuard API (`POST /v1/devices/{device_id}/wireguard-peer`
+and its `/revoke` counterpart, gated by the new `require_user_session`
+dependency), a one-shot reconciliation pass (`provisioning/reconciliation.py`,
+run via the `reconcile-wireguard` CLI command) that recovers crashed
+provision/revoke attempts and repairs safe drift without ever auto-repairing
+an ambiguous result, and three CLI seed commands
+(`seed-wireguard-protocol`, `create-vpn-server`, `grant-user-access`) for
+bootstrapping topology data.
 
 The exact contract 1.6b's agent client must honor, so it doesn't have to
 re-derive this from `services/vpn-agent`'s source:

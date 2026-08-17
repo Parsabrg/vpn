@@ -39,6 +39,22 @@ _CLAIM_SQL = text(
     """
 )
 
+_RECLAIM_EXPIRED_LEASES_SQL = text(
+    """
+    UPDATE email_deliveries
+    SET state = CASE
+            WHEN attempt_count + 1 >= :max_attempts THEN 'failed'
+            ELSE 'pending'
+        END,
+        attempt_count = attempt_count + 1,
+        result_code = 'lease_expired',
+        available_at = :now,
+        leased_until = NULL
+    WHERE state = 'sending' AND leased_until IS NOT NULL AND leased_until < :now
+    RETURNING id, state
+    """
+)
+
 _MARK_SENT_SQL = text(
     """
     UPDATE email_deliveries
@@ -82,6 +98,41 @@ class ClaimedDelivery:
     template_code: str
     recipient_address: str
     attempt_count: int
+
+
+async def reclaim_expired_leases(engine: AsyncEngine, *, max_attempts: int, now: datetime) -> int:
+    """Return rows whose lease expired to the queue, or fail them once they
+    are out of attempts.
+
+    Without this, a worker that dies between claiming a batch and finalizing
+    it (deploy, OOM, container restart) leaves those rows in 'sending'
+    forever: never delivered, never retried, and invisible because nothing
+    else reads `leased_until`. Reclaiming can re-send an email whose original
+    attempt was merely slow rather than dead, which is the standard
+    at-least-once tradeoff -- for an activation link a duplicate is strictly
+    better than a message that never arrives. `attempt_count` is incremented
+    on reclaim so a delivery that reliably kills the worker still exhausts
+    its attempts instead of looping forever.
+    """
+
+    async with engine.begin() as connection:
+        result = await connection.execute(
+            _RECLAIM_EXPIRED_LEASES_SQL, {"max_attempts": max_attempts, "now": now}
+        )
+        rows = result.mappings().all()
+        for row in rows:
+            await connection.execute(
+                _AUDIT_SQL,
+                {
+                    "id": uuid4(),
+                    "delivery_id": row["id"],
+                    "outcome": "failed" if row["state"] == "failed" else "denied",
+                    "reason_code": "lease_expired",
+                },
+            )
+    if rows:
+        _LOGGER.warning("Reclaimed %d email delivery lease(s) after expiry", len(rows))
+    return len(rows)
 
 
 async def claim_batch(
@@ -218,9 +269,19 @@ async def poll_once(
     """Claim and deliver one batch; return how many deliveries were processed."""
 
     now = clock()
+    await reclaim_expired_leases(engine, max_attempts=settings.max_attempts, now=now)
     claimed = await claim_batch(
         engine, batch_size=settings.batch_size, lease_seconds=settings.lease_seconds, now=now
     )
     for delivery in claimed:
-        await deliver_one(engine, redis_client, adapter, delivery, settings=settings, now=now)
+        try:
+            await deliver_one(engine, redis_client, adapter, delivery, settings=settings, now=now)
+        except Exception:
+            # One delivery must not strand the rest of the claimed batch. Any
+            # row left behind here keeps its lease and is picked back up by
+            # reclaim_expired_leases once that lease expires, rather than
+            # sitting in 'sending' indefinitely.
+            _LOGGER.exception(
+                "Email delivery raised unexpectedly", extra={"delivery_id": str(delivery.id)}
+            )
     return len(claimed)

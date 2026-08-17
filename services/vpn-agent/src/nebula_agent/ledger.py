@@ -8,9 +8,12 @@ exactly when retry storms are most likely.
 """
 
 import json
-from dataclasses import asdict, dataclass
+import logging
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path, PurePosixPath
 from uuid import UUID
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +23,25 @@ class LedgerEntry:
     target_id: str
     applied_generation: int
     response_json: str
+
+
+def _parse_entry(line: str) -> LedgerEntry | None:
+    """Return the entry this line encodes, or None if it is unusable."""
+
+    try:
+        payload = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    expected = {field.name for field in fields(LedgerEntry)}
+    if set(payload) != expected:
+        return None
+    # The exact field-set match above is what makes this construction safe:
+    # LedgerEntry is an unvalidated dataclass, so with the right keys present
+    # it cannot raise, and a wrong-typed value would have to come from a
+    # hand-edited ledger. Entries are re-serialized on compaction anyway.
+    return LedgerEntry(**payload)
 
 
 class OperationLedger:
@@ -33,15 +55,32 @@ class OperationLedger:
         self._load()
 
     def _load(self) -> None:
+        """Replay the ledger, skipping any line that cannot be parsed.
+
+        A process killed mid-append leaves a truncated final line, and a file
+        written by a version with different fields leaves unknown keys. Either
+        would abort startup if it propagated -- permanently bricking the agent
+        for exactly the crash-restart case this ledger exists to survive.
+        Dropping an unreadable entry only risks re-applying one operation,
+        which the control plane's `agent_operations` table already guards, so
+        it is strictly better than refusing to start.
+        """
+
         if not self._path.exists():
             return
+        skipped = 0
         for line in self._path.read_text().splitlines():
             if not line.strip():
                 continue
-            entry = LedgerEntry(**json.loads(line))
+            entry = _parse_entry(line)
+            if entry is None:
+                skipped += 1
+                continue
             if entry.idempotency_key not in self._entries:
                 self._order.append(entry.idempotency_key)
             self._entries[entry.idempotency_key] = entry
+        if skipped:
+            _LOGGER.warning("Skipped %d unreadable idempotency ledger entry/entries", skipped)
 
     def lookup(self, idempotency_key: UUID) -> LedgerEntry | None:
         return self._entries.get(str(idempotency_key))

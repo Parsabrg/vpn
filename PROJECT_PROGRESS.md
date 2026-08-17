@@ -4,14 +4,14 @@ Last updated: 2026-08-17
 
 ## Current phase
 
-Phase 1.6a — VPN agent (typed API, native WireGuard driver, host hardening),
+Phase 1.6b — control-plane VPN provisioning (`services/api`: mTLS agent
+client, provisioning orchestration, address allocator, reconciliation job,
+CLI seeding, and the first user-facing WireGuard peer-request API),
 implemented for review. Phase 1.1 was squash-merged in pull request #2,
 Phase 1.2 in pull request #5, Phase 1.3 in pull request #10, Phase 1.4 in
-pull request #24, and Phase 1.5 in pull request #28. Phase 1.6 is split into
-1.6a (this pass: `services/vpn-agent` only) and a follow-on 1.6b
-(`services/api`: agent client, provisioning orchestration, address allocator,
-reconciliation job, CLI seeding) along the natural agent/control-plane
-boundary.
+pull request #24, Phase 1.5 in pull request #28, and Phase 1.6a
+(`services/vpn-agent`) in pull request #30. Phase 1.6b closes the
+control-plane side of Phase 1.6 that 1.6a left for a follow-on PR.
 
 ## Completed
 
@@ -120,17 +120,42 @@ boundary.
   The Compose `vpn-agent:` service still only ever runs the capability-free
   fake driver, unchanged from Phase 1.1's "no network-administration
   capability" scaffold design.
+- Closed the Phase 1.6 control-plane gap: an mTLS `AgentClient` (one
+  instance per VPN server, classifying every agent-call failure into
+  unreachable/response-ambiguous/rejected so a lost response is never
+  mistaken for a definite outcome), a pure address allocator, and
+  `ProvisioningService` running peer request/revoke as three phases --
+  validate and write in-flight rows in one transaction, call the agent
+  outside any transaction, finalize in a fresh transaction -- proven
+  race-safe against real PostgreSQL in a new concurrency test.
+- Added the first user-facing WireGuard API: `POST
+  /v1/devices/{device_id}/wireguard-peer` and its `/revoke` counterpart,
+  gated by a new `require_user_session` bearer-token dependency (extracted
+  from the existing `/v1/auth/me` handler) with the same generic-denial
+  posture as every other route in this codebase.
+- Added a one-shot reconciliation pass (`reconcile-wireguard` CLI command)
+  that compares each in-flight or steady-state peer against the agent's
+  observed state, recovers DB state after a crash between the agent call
+  and its own follow-up transaction, repairs safe drift by re-issuing the
+  appropriate operation, and records (never auto-repairs) ambiguous drift
+  for operator triage, exiting non-zero on any repair failure or ambiguity.
+- Added three CLI seed commands (`seed-wireguard-protocol`,
+  `create-vpn-server`, `grant-user-access`), matching `seed_admin.py`'s
+  advisory-lock/transaction/audit shape -- there is now a way to create a
+  `vpn_servers` row and grant protocol permissions without raw SQL.
 
 ## Validation recorded locally
 
-- API: Ruff, format, and strict mypy pass. The suite collects 404 tests (5 skip
-  locally) and remains above the 95% branch-coverage gate (96.6%); the live
-  PostgreSQL tests, the real-Redis atomicity test, and the account-request and
-  user-management concurrency tests skip when those services are not configured
-  locally and run in CI.
+- API: Ruff, format, and strict mypy pass. The suite collects 539 tests (7 skip
+  locally) and remains above the 95% branch-coverage gate (96.0%); the live
+  PostgreSQL tests (including the two new provisioning-concurrency tests), the
+  real-Redis atomicity test, and the account-request/user-management
+  concurrency tests skip when those services are not configured locally and
+  run in CI.
 - Worker: Ruff, format, and strict mypy across 19 source/test files pass. The suite
-  collects 49 tests and remains above the 95% branch-coverage gate (96.3%).
-- VPN agent: Ruff, format, strict mypy, 122 pytest tests, and 98% branch
+  collects 54 tests and remains above the 95% branch-coverage gate (96.5%),
+  with `poller.py` at 100% after the lease-reclamation work.
+- VPN agent: Ruff, format, strict mypy, 126 pytest tests, and 98% branch
   coverage pass. `NativeWireGuardDriver`'s subprocess calls are exercised
   through a mocked `run_fixed_argv` boundary locally; the one real-kernel
   netns integration test is gated (`NEBULA_WG_NETNS_INTEGRATION`) and skips
@@ -153,12 +178,15 @@ boundary.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
 widget tests, image builds, the container health smoke test, the real PostgreSQL
-migration/permission round trip, and the new account-request concurrency test
-therefore remain CI gates rather than locally verified claims. The same is true of
-the new `netns-integration` CI job: whether a GitHub-hosted `ubuntu-latest` runner's
-kernel actually supports creating a WireGuard interface is unverified from here --
-the job is written to warn and skip gracefully rather than fail if it doesn't,
-pending a few real CI runs to confirm reliability before tightening that to fail-loud.
+migration/permission round trip, and the concurrency tests therefore remain CI gates
+rather than locally verified claims.
+
+The `netns-integration` job's open question is now resolved: on GitHub-hosted
+`ubuntu-latest` runners it creates a real kernel WireGuard interface and runs its
+real assertion (`1 passed`), not the warn-and-skip fallback -- confirmed from the
+job log on PR #31. The graceful-skip branch remains in place as a guard against
+future runner-image changes; tightening it to fail-loud is a deliberate follow-up
+rather than something to change while it is providing real coverage.
 
 ## External inputs pending
 
@@ -170,37 +198,39 @@ pending a few real CI runs to confirm reliability before tightening that to fail
 
 ## Next milestone
 
-- Review and merge the Phase 1.6a VPN agent after all CI checks pass,
-  including confirming the new `netns-integration` job actually runs its
-  real assertions (not just the warn-and-skip fallback) on GitHub-hosted
-  runners.
-- Begin Phase 1.6b: the `services/api` side of provisioning -- an mTLS
-  agent client, orchestration against `agent_operations`, the address
-  allocator, the reconciliation job, and a CLI seed command (matching
-  `seed_admin.py`'s pattern) for creating VPN servers and granting
-  permissions, since there is still no way to create a `vpn_servers` row
-  without raw SQL.
+- Review and merge Phase 1.6b after all CI checks pass, including the new
+  `test_provisioning_concurrency.py` real-Postgres job.
+- Begin Phase 1.7: Flutter foundation and account lifecycle (Material 3
+  design system, Riverpod state, GoRouter routes, Dio client, secure token
+  storage, and the sign-in/request/activation/home/devices flows) -- there
+  is now a real WireGuard peer-provisioning API for it to call.
 - Generate Android and Windows host projects after support versions are
   confirmed.
 
 ## Known limitations
 
-- Account request, approval, activation, outbox email delivery, and an
-  administrator dashboard to review and act on all of it now exist. The VPN
-  agent can now provision/revoke/enable/disable a real WireGuard peer and
-  report health/reconciliation against a real interface, but nothing on the
-  control-plane side calls it yet -- there is no agent client, no
-  provisioning orchestration, no address allocator, and no reconciliation
-  job (all Phase 1.6b). Xray runtime integration, native client tunnel
-  integration, backup, and production deployment do not exist yet either.
-- There is still no way to create a `vpn_servers` row, grant a protocol
-  permission, or assign a user to a server without raw SQL -- Phase 1.6b
-  adds a CLI seed command for this, by design rather than new admin
-  dashboard mutation UI this round.
-- The administrator dashboard's permissions, assignments, and server-health pages
-  are honest empty-state shells: no VPN server or protocol profile has ever been
-  created, and permissions/assignments have no backend API at all yet, both by
-  design until Phase 1.6b.
+- Account request, approval, activation, outbox email delivery, an
+  administrator dashboard, and now a complete WireGuard provisioning path
+  (mTLS agent client, three-phase orchestration, address allocation,
+  reconciliation, and a user-facing peer-request API) all exist. Xray
+  runtime integration, native client tunnel integration, backup, and
+  production deployment do not exist yet.
+- No client application exists yet to call the new WireGuard peer-request
+  API -- Phase 1.7's Flutter app is the first consumer.
+- Creating a `vpn_servers` row, seeding the WireGuard protocol/profile, and
+  granting permissions/assignments is done via CLI seed commands
+  (`nebula-api seed-wireguard-protocol|create-vpn-server|grant-user-access`),
+  by design rather than new admin dashboard mutation UI this round.
+- The administrator dashboard's permissions, assignments, and server-health
+  pages remain honest empty-state shells: Phase 1.6b added CLI seeding and a
+  user-facing provisioning API, not new admin dashboard mutation UI for
+  granting permissions/assignments or viewing server health -- that stays
+  out of scope until a later phase revisits the admin dashboard.
+- WireGuard client-address allocation never reclaims addresses from
+  revoked/failed peers (`wireguard_peers`' server+address uniqueness
+  constraint is unconditional, not scoped to live peers) -- an address pool
+  must be sized generously for its expected device churn. Accepted as a
+  Phase 1 limitation rather than a live schema change.
 - The VPN agent's real driver is only exercised by the gated CI netns job and
   (once deployed) the systemd unit in `services/vpn-agent/deploy/` -- it never
   runs in this repository's Docker/Compose stack, which stays on the

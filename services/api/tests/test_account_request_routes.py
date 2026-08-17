@@ -142,6 +142,51 @@ def test_submit_request_and_activate_return_neutral_contracts() -> None:
         assert response.headers["cache-control"] == "no-store"
 
 
+def test_submit_request_accepts_a_valid_username() -> None:
+    with make_client() as client:
+        response = client.post(
+            "/v1/account-requests/",
+            json={"email": "applicant@example.com", "username": "Valid.User-1"},
+        )
+
+    assert response.status_code == 202
+
+
+def test_submit_request_rejects_a_malformed_username() -> None:
+    """The schema-level username rule is a rejection layer on a public
+    endpoint; normalization itself happens in the service.
+    """
+
+    malformed = [
+        "ab",  # too short for normalize_username's 3-char floor
+        "_leading",  # must start alphanumeric
+        "trailing_",  # must end alphanumeric
+        "has space",
+        "wîth-non-ascii",
+        "a" * 33,  # past the 32-char ceiling
+    ]
+    with make_client() as client:
+        statuses = [
+            client.post(
+                "/v1/account-requests/",
+                json={"email": "applicant@example.com", "username": candidate},
+            ).status_code
+            for candidate in malformed
+        ]
+
+    assert statuses == [422] * len(malformed)
+
+
+def test_submit_request_treats_an_omitted_username_as_absent() -> None:
+    with make_client() as client:
+        explicit_null = client.post(
+            "/v1/account-requests/",
+            json={"email": "applicant@example.com", "username": None},
+        )
+
+    assert explicit_null.status_code == 202
+
+
 def test_submit_request_rejects_wrong_media_type() -> None:
     with make_client() as client:
         response = client.post(

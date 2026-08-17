@@ -53,6 +53,12 @@ class Settings(BaseSettings):
     mfa_encryption_key_file: Path | None = None
     mfa_key_version: int = Field(default=1, ge=1, le=2_147_483_647)
 
+    agent_client_cert_file: Path | None = None
+    agent_client_key_file: Path | None = None
+    agent_trusted_ca_file: Path | None = None
+    agent_request_timeout_seconds: float = Field(default=10.0, ge=1.0, le=60.0)
+    reconciliation_batch_size: int = Field(default=500, ge=1, le=5_000)
+
     access_token_ttl_seconds: int = Field(default=900, ge=60, le=3_600)
     refresh_token_ttl_days: int = Field(default=30, ge=1, le=90)
     password_reset_ttl_minutes: int = Field(default=30, ge=5, le=120)
@@ -73,6 +79,7 @@ class Settings(BaseSettings):
     account_request_rate_limit: int = Field(default=5, ge=1, le=50)
     account_request_review_rate_limit: int = Field(default=20, ge=1, le=100)
     admin_user_mutation_rate_limit: int = Field(default=20, ge=1, le=100)
+    device_provision_rate_limit: int = Field(default=10, ge=1, le=100)
     admin_lockout_threshold: int = Field(default=5, ge=2, le=20)
     admin_lockout_seconds: int = Field(default=900, ge=60, le=86_400)
 
@@ -156,6 +163,9 @@ class Settings(BaseSettings):
             "jwt_public_key_file": self.jwt_public_key_file,
             "token_pepper_file": self.token_pepper_file,
             "mfa_encryption_key_file": self.mfa_encryption_key_file,
+            "agent_client_cert_file": self.agent_client_cert_file,
+            "agent_client_key_file": self.agent_client_key_file,
+            "agent_trusted_ca_file": self.agent_trusted_ca_file,
         }
         missing = [name for name, path in required_secret_files.items() if path is None]
         if missing:

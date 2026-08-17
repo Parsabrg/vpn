@@ -1,10 +1,10 @@
 """Public user-authentication HTTP routes with a deliberately generic failure surface."""
 
 import logging
-from typing import NoReturn, cast
+from typing import Annotated, NoReturn, cast
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from nebula_api.auth.http import (
     apply_auth_response_headers,
@@ -22,7 +22,9 @@ from nebula_api.auth.schemas import (
     UserLoginRequest,
     UserPrincipalResponse,
 )
+from nebula_api.auth.user_authorization import require_user_session
 from nebula_api.auth.user_service import (
+    AuthenticatedUser,
     AuthenticationRateLimited,
     AuthenticationRejected,
     PasswordResetDelivery,
@@ -127,15 +129,10 @@ async def logout(payload: LogoutRequest, request: Request) -> Response:
 
 
 @router.get("/me", response_model=UserPrincipalResponse)
-async def me(request: Request, response: Response) -> UserPrincipalResponse:
-    authorization = request.headers.get("authorization", "")
-    scheme, separator, token = authorization.partition(" ")
-    if separator != " " or scheme != "Bearer" or not token or " " in token:
-        _raise_public_auth_error(AuthenticationRejected())
-    try:
-        principal = await _service(request).authenticate_access_token(token)
-    except (AuthenticationRejected, AuthStateUnavailable) as error:
-        _raise_public_auth_error(error)
+async def me(
+    response: Response,
+    principal: Annotated[AuthenticatedUser, Depends(require_user_session)],
+) -> UserPrincipalResponse:
     apply_auth_response_headers(response)
     return UserPrincipalResponse(
         user_id=principal.user_id,
