@@ -14,6 +14,7 @@ from nebula_api.accounts.email_outbox import EmailOutboxRedisClient
 from nebula_api.accounts.routes import admin_router as account_request_admin_router
 from nebula_api.accounts.routes import router as account_request_router
 from nebula_api.accounts.service import AccountRequestService
+from nebula_api.agent_client.client import AgentClient
 from nebula_api.audit.routes import router as audit_log_router
 from nebula_api.audit.service import AuditLogService
 from nebula_api.auth.admin_routes import router as admin_auth_router
@@ -25,8 +26,10 @@ from nebula_api.auth.user_routes import router as user_auth_router
 from nebula_api.auth.user_service import PasswordResetDelivery, UserAuthService
 from nebula_api.db.engine import create_database_engine, create_session_factory
 from nebula_api.db.schema import schema_is_current
+from nebula_api.devices.routes import router as devices_router
 from nebula_api.email_deliveries.routes import router as email_delivery_router
 from nebula_api.email_deliveries.service import EmailDeliveryService
+from nebula_api.provisioning.service import ProvisioningService
 from nebula_api.request_limits import RequestBodyLimitMiddleware
 from nebula_api.settings import Settings, get_settings
 from nebula_api.topology_admin.routes import router as topology_admin_router
@@ -58,6 +61,7 @@ def create_app(
     email_delivery_service: EmailDeliveryService | None = None,
     topology_admin_service: TopologyAdminService | None = None,
     user_management_service: UserManagementService | None = None,
+    provisioning_service: ProvisioningService | None = None,
     password_reset_delivery: PasswordResetDelivery | None = None,
 ) -> FastAPI:
     """Create an API instance with startup and database-gated readiness."""
@@ -72,6 +76,7 @@ def create_app(
     effective_email_delivery_service = email_delivery_service
     effective_topology_admin_service = topology_admin_service
     effective_user_management_service = user_management_service
+    effective_provisioning_service = provisioning_service
     effective_readiness_check: ReadinessCheck
 
     if readiness_check is None:
@@ -115,6 +120,15 @@ def create_app(
                     create_session_factory(database_engine),
                     redis_auth_state,
                     runtime_settings,
+                )
+            if effective_provisioning_service is None:
+                effective_provisioning_service = ProvisioningService(
+                    create_session_factory(database_engine),
+                    redis_auth_state,
+                    runtime_settings,
+                    lambda agent_host, agent_port: AgentClient(
+                        agent_host=agent_host, agent_port=agent_port, settings=runtime_settings
+                    ),
                 )
         if effective_audit_log_service is None:
             effective_audit_log_service = AuditLogService(create_session_factory(database_engine))
@@ -172,6 +186,7 @@ def create_app(
     application.state.email_delivery_service = effective_email_delivery_service
     application.state.topology_admin_service = effective_topology_admin_service
     application.state.user_management_service = effective_user_management_service
+    application.state.provisioning_service = effective_provisioning_service
     application.state.password_reset_delivery = password_reset_delivery
     install_auth_http_safeguards(application, runtime_settings)
     application.add_middleware(
@@ -186,6 +201,7 @@ def create_app(
     application.include_router(email_delivery_router)
     application.include_router(topology_admin_router)
     application.include_router(user_management_router)
+    application.include_router(devices_router)
 
     @application.get("/healthz", response_model=ProbeResponse, tags=["probes"])
     async def health() -> ProbeResponse:
