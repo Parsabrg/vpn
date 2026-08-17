@@ -66,6 +66,12 @@ _CANDIDATE_STATES = (
 )
 _RUNNING_STUCK_STATES = (ProvisioningState.APPLYING.value, ProvisioningState.REVOKING.value)
 
+# Matches agent_operations.attempt_count_range's CHECK constraint. A repair
+# whose response keeps coming back ambiguous deliberately leaves its operation
+# "running" for the next pass to retry, so this counter climbs once per run and
+# would eventually breach the constraint if it were not clamped.
+_MAX_ATTEMPT_COUNT = 100
+
 
 @dataclass(slots=True)
 class ReconciliationSummary:
@@ -74,10 +80,11 @@ class ReconciliationSummary:
     repaired: int = 0
     repair_failed: int = 0
     ambiguous: int = 0
+    errored: int = 0
 
     @property
     def had_problems(self) -> bool:
-        return self.repair_failed > 0 or self.ambiguous > 0
+        return self.repair_failed > 0 or self.ambiguous > 0 or self.errored > 0
 
 
 async def run_reconciliation(
@@ -114,9 +121,22 @@ async def run_reconciliation(
 
     for peer in peers:
         summary.checked += 1
-        await _reconcile_one(
-            session_factory, agent_client_builder, servers[peer.vpn_server_id], peer, summary, clock
-        )
+        try:
+            await _reconcile_one(
+                session_factory,
+                agent_client_builder,
+                servers[peer.vpn_server_id],
+                peer,
+                summary,
+                clock,
+            )
+        except Exception:
+            # One peer must never strand the rest of the batch: without this
+            # boundary an unexpected failure here (a constraint violation, a
+            # lost connection mid-transaction) would abort the whole pass and
+            # every peer after this one would silently go unreconciled.
+            summary.errored += 1
+            _LOGGER.exception("reconciliation failed unexpectedly for peer %s", peer.id)
     return summary
 
 
@@ -316,7 +336,7 @@ async def _repair(
             )
             session.add(operation)
         else:
-            operation.attempt_count += 1
+            operation.attempt_count = min(operation.attempt_count + 1, _MAX_ATTEMPT_COUNT)
             operation.started_at = now
         await session.flush()
         idempotency_key = operation.idempotency_key

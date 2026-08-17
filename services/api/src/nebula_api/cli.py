@@ -197,7 +197,7 @@ async def run_reconcile_wireguard() -> int:
     print(
         f"Reconciled {summary.checked} peer(s): {summary.in_sync} in sync, "
         f"{summary.repaired} repaired, {summary.repair_failed} repair(s) failed, "
-        f"{summary.ambiguous} ambiguous."
+        f"{summary.ambiguous} ambiguous, {summary.errored} errored."
     )
     return 1 if summary.had_problems else 0
 

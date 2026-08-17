@@ -1,5 +1,6 @@
 """User-facing WireGuard peer provisioning HTTP routes."""
 
+import logging
 from typing import Annotated, NoReturn, cast
 from uuid import UUID, uuid4
 
@@ -20,11 +21,13 @@ from nebula_api.provisioning.service import (
     ProvisioningAmbiguous,
     ProvisioningError,
     ProvisioningRateLimited,
+    ProvisioningRejected,
     ProvisioningService,
     RequestPeerResult,
 )
 
 router = APIRouter(prefix="/v1/devices", tags=["devices"])
+_LOGGER = logging.getLogger(__name__)
 
 _GENERIC_DETAIL = "Request was not accepted"
 
@@ -57,7 +60,18 @@ def _raise_provisioning_error(error: Exception) -> NoReturn:
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="WireGuard provisioning is temporarily unavailable",
         ) from None
-    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_GENERIC_DETAIL) from None
+    if isinstance(error, ProvisioningRejected):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=_GENERIC_DETAIL
+        ) from None
+    # A bare ProvisioningError is an internal invariant failure (rows vanishing
+    # mid-finalization), not a bad request -- reporting it as 4xx would both
+    # mislead the client and bury a real server fault in client-error noise.
+    # The message may name internal state, so it is logged, never returned.
+    _LOGGER.error("provisioning failed with an internal error", exc_info=error)
+    raise HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=_GENERIC_DETAIL
+    ) from None
 
 
 def _to_response(result: RequestPeerResult) -> WireGuardPeerResponse:

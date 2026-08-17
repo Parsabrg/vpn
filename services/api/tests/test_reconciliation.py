@@ -4,7 +4,7 @@ from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import Select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +42,7 @@ def test_summary_had_problems_reflects_repairs_and_ambiguity() -> None:
     assert not ReconciliationSummary().had_problems
     assert ReconciliationSummary(repair_failed=1).had_problems
     assert ReconciliationSummary(ambiguous=1).had_problems
+    assert ReconciliationSummary(errored=1).had_problems
     assert not ReconciliationSummary(repaired=3, in_sync=5).had_problems
 
 
@@ -404,6 +405,60 @@ def test_repair_response_ambiguous_leaves_the_operation_running() -> None:
     assert summary.repair_failed == 1
     assert peer.state == ProvisioningState.ACTIVE.value
     assert operation.state == OperationState.RUNNING.value
+
+
+def test_repair_clamps_attempt_count_at_the_check_constraint_ceiling() -> None:
+    """A persistently ambiguous repair leaves its operation running, so
+    attempt_count climbs once per pass -- it must stop at 100 rather than
+    breach agent_operations.attempt_count_range."""
+
+    peer = _peer(state=ProvisioningState.ACTIVE.value)
+    credential = _credential(state=ProvisioningState.ACTIVE.value)
+    operation = _running_operation()
+    operation.attempt_count = 100
+    session = make_session(
+        {WireGuardPeer: [peer], VPNServer: [_server()]},
+        {WireGuardPeer: peer, DeviceProtocolCredential: credential, AgentOperation: operation},
+    )
+    agent = FakeAgentClient(
+        reconcile=_reconcile_response(outcome="drift_detected"),
+        provision=AgentResponseAmbiguous("read timeout"),
+    )
+
+    _run(session, agent)
+
+    assert operation.attempt_count == 100
+
+
+def test_one_failing_peer_does_not_abort_the_rest_of_the_batch() -> None:
+    """Without a per-peer error boundary, an unexpected failure would abort
+    the whole pass and silently leave every later peer unreconciled."""
+
+    first = _peer(state=ProvisioningState.ACTIVE.value)
+    second = _peer(state=ProvisioningState.ACTIVE.value)
+    second.id = uuid4()
+    session = make_session(
+        {WireGuardPeer: [first, second], VPNServer: [_server()]}, {WireGuardPeer: first}
+    )
+
+    calls: list[UUID] = []
+
+    class ExplodingOnFirstAgent(FakeAgentClient):
+        async def reconcile(self, request: ReconcileRequest) -> ReconcileResponse:
+            calls.append(request.target_id)
+            if request.target_id == first.id:
+                raise RuntimeError("unexpected boom")
+            return _reconcile_response(outcome="in_sync")
+
+    agent = ExplodingOnFirstAgent(reconcile=_reconcile_response(outcome="in_sync"))
+
+    summary = _run(session, agent)
+
+    assert summary.checked == 2
+    assert summary.errored == 1
+    assert summary.in_sync == 1
+    assert summary.had_problems
+    assert calls == [first.id, second.id]
 
 
 def test_reconciliation_skips_servers_that_are_not_active() -> None:

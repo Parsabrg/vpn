@@ -177,12 +177,15 @@ control-plane side of Phase 1.6 that 1.6a left for a follow-on PR.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
 widget tests, image builds, the container health smoke test, the real PostgreSQL
-migration/permission round trip, and the new account-request concurrency test
-therefore remain CI gates rather than locally verified claims. The same is true of
-the new `netns-integration` CI job: whether a GitHub-hosted `ubuntu-latest` runner's
-kernel actually supports creating a WireGuard interface is unverified from here --
-the job is written to warn and skip gracefully rather than fail if it doesn't,
-pending a few real CI runs to confirm reliability before tightening that to fail-loud.
+migration/permission round trip, and the concurrency tests therefore remain CI gates
+rather than locally verified claims.
+
+The `netns-integration` job's open question is now resolved: on GitHub-hosted
+`ubuntu-latest` runners it creates a real kernel WireGuard interface and runs its
+real assertion (`1 passed`), not the warn-and-skip fallback -- confirmed from the
+job log on PR #31. The graceful-skip branch remains in place as a guard against
+future runner-image changes; tightening it to fail-loud is a deliberate follow-up
+rather than something to change while it is providing real coverage.
 
 ## External inputs pending
 

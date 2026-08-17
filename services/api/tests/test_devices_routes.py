@@ -15,6 +15,7 @@ from nebula_api.provisioning.service import (
     DeviceAlreadyHasPeer,
     OperationInProgress,
     ProvisioningAmbiguous,
+    ProvisioningError,
     ProvisioningRateLimited,
     ProvisioningRejected,
     ProvisioningService,
@@ -177,6 +178,21 @@ def test_request_wireguard_peer_maps_a_generic_rejection_to_400() -> None:
         )
 
     assert response.status_code == 400
+
+
+def test_request_wireguard_peer_maps_an_internal_invariant_failure_to_500() -> None:
+    """A bare ProvisioningError means server-side state is inconsistent, not
+    that the request was bad -- and its message must not reach the client."""
+
+    service = FakeProvisioningService()
+    service.error = ProvisioningError("provisioning rows disappeared mid-finalization")
+    with make_client(provisioning_service=service) as client:
+        response = client.post(
+            f"/v1/devices/{DEVICE_ID}/wireguard-peer", json=VALID_BODY, headers=AUTH_HEADERS
+        )
+
+    assert response.status_code == 500
+    assert "disappeared" not in response.text
 
 
 def test_request_wireguard_peer_maps_unavailable_auth_state_to_503() -> None:
