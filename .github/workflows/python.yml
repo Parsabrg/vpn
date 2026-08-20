@@ -63,7 +63,7 @@ jobs:
       NEBULA_REDIS_URL: redis://redis:6379/0
     steps:
       # actions/checkout v7.0.0
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       # One virtualenv per service, mirroring how they are developed locally.
       # A single shared environment cannot work: the services deliberately do
       # not import each other, and each pins its runtime dependencies exactly,
@@ -131,7 +131,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # actions/checkout v7.0.0
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
       - name: Install WireGuard userspace tools
         run: sudo apt-get update && sudo apt-get install -y wireguard-tools
       - name: Install VPN agent
