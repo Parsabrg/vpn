@@ -1,68 +1,24 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class NebulaApp extends StatelessWidget {
+import '../core/routing/app_router.dart';
+import '../core/theme/nebula_theme.dart';
+import '../core/theme/theme_mode_controller.dart';
+
+class NebulaApp extends ConsumerWidget {
   const NebulaApp({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeMode themeMode = ref.watch(themeModeProvider);
+
+    return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: 'Nebula VPN',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF315EFB)),
-        useMaterial3: true,
-      ),
-      darkTheme: ThemeData(
-        brightness: Brightness.dark,
-        colorScheme: ColorScheme.fromSeed(
-          brightness: Brightness.dark,
-          seedColor: const Color(0xFF89A7FF),
-        ),
-        useMaterial3: true,
-      ),
-      home: const Scaffold(body: _ScaffoldStatus()),
-    );
-  }
-}
-
-class _ScaffoldStatus extends StatelessWidget {
-  const _ScaffoldStatus();
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: const Padding(
-            padding: EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Icon(Icons.shield_outlined, size: 64),
-                SizedBox(height: 24),
-                Text(
-                  'Nebula VPN',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.w600),
-                ),
-                SizedBox(height: 12),
-                Text(
-                  'Client workspace ready',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 18),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Authentication and VPN connectivity are not implemented yet.',
-                  textAlign: TextAlign.center,
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
+      theme: NebulaTheme.light(),
+      darkTheme: NebulaTheme.dark(),
+      themeMode: themeMode,
+      routerConfig: ref.watch(routerProvider),
     );
   }
 }

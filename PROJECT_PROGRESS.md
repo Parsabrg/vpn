@@ -1,17 +1,25 @@
 # Project progress
 
-Last updated: 2026-08-17
+Last updated: 2026-08-21
 
 ## Current phase
 
-Phase 1.6b — control-plane VPN provisioning (`services/api`: mTLS agent
-client, provisioning orchestration, address allocator, reconciliation job,
-CLI seeding, and the first user-facing WireGuard peer-request API),
+Phase 1.7a — Flutter foundation and account lifecycle (`apps/mobile`:
+Material 3 theming, hand-written Riverpod state, GoRouter with an
+auth-gated redirect, a Dio client with token-refresh serialization, secure
+refresh-token storage, and the splash/sign-in/account-request/activation/
+password-reset/home/account/settings screens wired to the real API),
 implemented for review. Phase 1.1 was squash-merged in pull request #2,
 Phase 1.2 in pull request #5, Phase 1.3 in pull request #10, Phase 1.4 in
-pull request #24, Phase 1.5 in pull request #28, and Phase 1.6a
-(`services/vpn-agent`) in pull request #30. Phase 1.6b closes the
-control-plane side of Phase 1.6 that 1.6a left for a follow-on PR.
+pull request #24, Phase 1.5 in pull request #28, Phase 1.6a
+(`services/vpn-agent`) in pull request #30, and Phase 1.6b (control-plane
+VPN provisioning) in pull request #31. Phase 1.7a is a deliberately
+narrowed first half of the documented Phase 1.7: the device-connection
+screens and WireGuard "connect" flow are Phase 1.7b, because the API has no
+public endpoint yet for a user to discover which server/profile they're
+allowed to use (`POST /v1/devices/{id}/wireguard-peer` requires a
+`server_code`; only an admin-only listing route exists today). This mirrors
+how Phase 1.6 itself was split into 1.6a/1.6b along a natural boundary.
 
 ## Completed
 
@@ -143,6 +151,39 @@ control-plane side of Phase 1.6 that 1.6a left for a follow-on PR.
   `create-vpn-server`, `grant-user-access`), matching `seed_admin.py`'s
   advisory-lock/transaction/audit shape -- there is now a way to create a
   `vpn_servers` row and grant protocol permissions without raw SQL.
+- Replaced the Phase 1.1 `apps/mobile` placeholder shell with a real,
+  themed, routed, stateful Flutter app: Material 3 light/dark/system
+  theming with a single reduced-motion enforcement point used by every page
+  transition; hand-written Riverpod state (no codegen, to keep the existing
+  `pub get -> format -> analyze -> test` CI pipeline unchanged); a GoRouter
+  route table with a single `redirect` driven by a closed `AuthState` sum
+  type (`AuthAuthenticating` / `AuthUnauthenticated` / `AuthAuthenticated` /
+  `AuthSessionExpired`); and a Dio client whose `AuthInterceptor` attaches
+  bearer tokens and, on a 401, serializes concurrent token refreshes behind
+  a single in-flight `Completer` (`TokenRefresher`) so N simultaneous
+  expired-token requests trigger exactly one `/v1/auth/refresh` call.
+- Added `SecureTokenStore` (refresh token only, Keystore/DPAPI-backed via
+  `flutter_secure_storage`; the short-lived access token stays in memory)
+  and plain `shared_preferences`-backed stores for the non-secret
+  server-assigned `device_id` and the theme-mode override -- both kept
+  behind narrow interfaces so tests substitute in-memory fakes instead of
+  hitting platform channels unavailable in headless `flutter test`.
+- Added the account-lifecycle screens against the real, already-shipped
+  endpoints: splash (silent refresh-token bootstrap), sign-in, account
+  request, activation, and password reset (request + confirm) -- request/
+  reset screens render identical neutral copy regardless of outcome,
+  matching the API's own account-enumeration-resistant design, and
+  activation/reset tokens are entered by manual paste (no deep-linking
+  infrastructure this phase). Device name/platform/client-version are
+  sourced from `dart:io`/a manually-synced constant rather than adding
+  `device_info_plus`/`package_info_plus`, matching this repo's
+  minimal-dependency discipline.
+- Added an authenticated home shell (bottom-nav Devices/Account/Settings):
+  Account renders `/v1/auth/me` and signs out (clearing local state
+  unconditionally, even if the network logout call fails); Settings holds
+  the theme-mode control; Devices is an honest empty state naming the
+  Phase 1.7b server-discovery dependency instead of faking a device list,
+  mirroring `apps/admin`'s Phase 1.5 empty-state precedent.
 
 ## Validation recorded locally
 
@@ -174,6 +215,36 @@ control-plane side of Phase 1.6 that 1.6a left for a follow-on PR.
   new migration was needed for Phase 1.4 (the schema was already in place).
 - `pip check` reports no broken Python requirements; the current vulnerability
   audit remains a required CI gate.
+- Mobile: `flutter pub get`, `dart format --set-exit-if-changed`,
+  `flutter analyze --fatal-infos`, and `flutter test` (30 tests across
+  `AuthNotifier` state transitions, `TokenRefresher` concurrency, Dio error
+  translation, GoRouter redirect behavior, reduced motion, and screen-level
+  form/accessibility checks) all pass, confirmed both locally (Flutter 3.44.9,
+  bootstrapped via the community mirrors at `storage.flutter-io.cn` /
+  `pub.flutter-io.cn` after `storage.googleapis.com`/`pub.dev` proved
+  intermittently blocked from this development machine) and by the PR's own
+  `Flutter / checks` GitHub Actions job (`ghcr.io/cirruslabs/flutter:3.44.0`)
+  on pull request #38. Three real defects surfaced only by running these
+  tools -- not caught by manual review -- and were fixed: two test files
+  used `secureTokenStoreProvider`/`deviceIdStoreProvider` without importing
+  `storage_providers.dart`; `AccountScreen` called `const Semantics(...)`
+  though `Semantics`'s constructor isn't const in this Flutter version; and
+  two tests had incorrect setup (a login-failure test skipped driving the
+  notifier to `Unauthenticated` first, and a splash-screen router test used
+  `pumpAndSettle` against a screen whose progress indicator animates
+  indefinitely and therefore never settles).
+- The PR's `Dependency review` check fails on a Dart-ecosystem license-casing
+  quirk, not a real license problem: pub.dev reports licenses lowercased
+  (e.g. `bsd-3-clause`), which the action's case-sensitive SPDX matching
+  can't validate, so it reports "could not detect the validity" for every
+  new package even though direct inspection of each package's cached
+  `LICENSE` file confirms they are all MIT, Apache-2.0, or BSD-3-Clause --
+  nowhere near the `deny-licenses` list. Left as a known CI false positive
+  rather than switching `dependency-review.yml` from `deny-licenses` to
+  `allow-licenses` (they are mutually exclusive in
+  `actions/dependency-review-action`, and switching would need auditing
+  every ecosystem in this repo -- npm, pip, GitHub Actions -- not just the
+  new Dart packages, which is out of scope for a Flutter-only phase).
 - GitHub Action references use full commit SHAs.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
@@ -198,12 +269,14 @@ rather than something to change while it is providing real coverage.
 
 ## Next milestone
 
-- Review and merge Phase 1.6b after all CI checks pass, including the new
-  `test_provisioning_concurrency.py` real-Postgres job.
-- Begin Phase 1.7: Flutter foundation and account lifecycle (Material 3
-  design system, Riverpod state, GoRouter routes, Dio client, secure token
-  storage, and the sign-in/request/activation/home/devices flows) -- there
-  is now a real WireGuard peer-provisioning API for it to call.
+- Review and merge Phase 1.7a after all CI checks pass, including the
+  Flutter job (`.github/workflows/flutter.yml`) that has not run locally.
+- Begin Phase 1.7b: add a public, permission-scoped server/profile
+  discovery endpoint to `services/api` (there is currently no non-admin way
+  for a user to learn which `server_code` values they're allowed to use),
+  then build the devices list, WireGuard connect flow, and remaining
+  connection-state screens against it and the existing
+  `POST /v1/devices/{device_id}/wireguard-peer` API.
 - Generate Android and Windows host projects after support versions are
   confirmed.
 
@@ -215,8 +288,11 @@ rather than something to change while it is providing real coverage.
   reconciliation, and a user-facing peer-request API) all exist. Xray
   runtime integration, native client tunnel integration, backup, and
   production deployment do not exist yet.
+- The Flutter app now exists and handles the full account lifecycle, but
+  does not yet call the WireGuard peer-request API -- its devices screen is
+  an honest empty state pending Phase 1.7b's server-discovery endpoint.
 - No client application exists yet to call the new WireGuard peer-request
-  API -- Phase 1.7's Flutter app is the first consumer.
+  API for a real connection -- that remains Phase 1.7b's job.
 - Creating a `vpn_servers` row, seeding the WireGuard protocol/profile, and
   granting permissions/assignments is done via CLI seed commands
   (`nebula-api seed-wireguard-protocol|create-vpn-server|grant-user-access`),
