@@ -16,6 +16,10 @@ import UserDetailLoading from "@/app/(protected)/users/[userId]/loading";
 import UserDetailError from "@/app/(protected)/users/[userId]/error";
 import ServerHealthLoading from "@/app/(protected)/server-health/loading";
 import ServerHealthError from "@/app/(protected)/server-health/error";
+import PermissionsLoading from "@/app/(protected)/permissions/loading";
+import PermissionsError from "@/app/(protected)/permissions/error";
+import AssignmentsLoading from "@/app/(protected)/assignments/loading";
+import AssignmentsError from "@/app/(protected)/assignments/error";
 
 const segments = [
   { name: "overview", Loading: OverviewLoading, Error: OverviewError },
@@ -33,6 +37,8 @@ const segments = [
     Loading: ServerHealthLoading,
     Error: ServerHealthError,
   },
+  { name: "permissions", Loading: PermissionsLoading, Error: PermissionsError },
+  { name: "assignments", Loading: AssignmentsLoading, Error: AssignmentsError },
 ];
 
 describe.each(segments)("$name route segment", ({ Loading, Error }) => {
