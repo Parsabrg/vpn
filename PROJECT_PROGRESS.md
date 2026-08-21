@@ -215,20 +215,36 @@ how Phase 1.6 itself was split into 1.6a/1.6b along a natural boundary.
   new migration was needed for Phase 1.4 (the schema was already in place).
 - `pip check` reports no broken Python requirements; the current vulnerability
   audit remains a required CI gate.
-- Mobile: not locally verified. This development machine has no Flutter SDK
-  installed (same constraint noted below for prior phases), so
-  `flutter pub get`, `dart format --set-exit-if-changed`,
-  `flutter analyze --fatal-infos`, and `flutter test` (26 new/replaced test
-  cases across `AuthNotifier` state transitions, `TokenRefresher`
-  concurrency, Dio error translation, GoRouter redirect behavior, reduced
-  motion, and screen-level form/accessibility checks) have not been run
-  end to end here and remain a CI gate (`.github/workflows/flutter.yml`)
-  rather than a locally verified claim. New pubspec dependency versions
-  (`dio`, `flutter_riverpod`, `flutter_secure_storage`, `go_router`,
-  `shared_preferences`) were chosen as real published versions compatible
-  with the pinned Flutter/Dart SDK range but were not resolved against
-  pub.dev locally either -- `flutter pub get` in CI is the first real
-  check of that resolution.
+- Mobile: `flutter pub get`, `dart format --set-exit-if-changed`,
+  `flutter analyze --fatal-infos`, and `flutter test` (30 tests across
+  `AuthNotifier` state transitions, `TokenRefresher` concurrency, Dio error
+  translation, GoRouter redirect behavior, reduced motion, and screen-level
+  form/accessibility checks) all pass, confirmed both locally (Flutter 3.44.9,
+  bootstrapped via the community mirrors at `storage.flutter-io.cn` /
+  `pub.flutter-io.cn` after `storage.googleapis.com`/`pub.dev` proved
+  intermittently blocked from this development machine) and by the PR's own
+  `Flutter / checks` GitHub Actions job (`ghcr.io/cirruslabs/flutter:3.44.0`)
+  on pull request #38. Three real defects surfaced only by running these
+  tools -- not caught by manual review -- and were fixed: two test files
+  used `secureTokenStoreProvider`/`deviceIdStoreProvider` without importing
+  `storage_providers.dart`; `AccountScreen` called `const Semantics(...)`
+  though `Semantics`'s constructor isn't const in this Flutter version; and
+  two tests had incorrect setup (a login-failure test skipped driving the
+  notifier to `Unauthenticated` first, and a splash-screen router test used
+  `pumpAndSettle` against a screen whose progress indicator animates
+  indefinitely and therefore never settles).
+- The PR's `Dependency review` check fails on a Dart-ecosystem license-casing
+  quirk, not a real license problem: pub.dev reports licenses lowercased
+  (e.g. `bsd-3-clause`), which the action's case-sensitive SPDX matching
+  can't validate, so it reports "could not detect the validity" for every
+  new package even though direct inspection of each package's cached
+  `LICENSE` file confirms they are all MIT, Apache-2.0, or BSD-3-Clause --
+  nowhere near the `deny-licenses` list. Left as a known CI false positive
+  rather than switching `dependency-review.yml` from `deny-licenses` to
+  `allow-licenses` (they are mutually exclusive in
+  `actions/dependency-review-action`, and switching would need auditing
+  every ecosystem in this repo -- npm, pip, GitHub Actions -- not just the
+  new Dart packages, which is out of scope for a Flutter-only phase).
 - GitHub Action references use full commit SHAs.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
