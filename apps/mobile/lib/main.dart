@@ -29,9 +29,6 @@ Future<void> main() async {
   unawaited(container.read(authNotifierProvider.notifier).bootstrap());
 
   runApp(
-    UncontrolledProviderScope(
-      container: container,
-      child: const NebulaApp(),
-    ),
+    UncontrolledProviderScope(container: container, child: const NebulaApp()),
   );
 }

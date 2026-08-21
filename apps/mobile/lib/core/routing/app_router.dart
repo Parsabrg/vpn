@@ -52,9 +52,7 @@ String? _redirect(Ref ref, GoRouterState state) {
 }
 
 final routerProvider = Provider<GoRouter>((Ref ref) {
-  final _AuthRefreshListenable refreshListenable = _AuthRefreshListenable(
-    ref,
-  );
+  final _AuthRefreshListenable refreshListenable = _AuthRefreshListenable(ref);
   ref.onDispose(refreshListenable.dispose);
 
   return GoRouter(
@@ -86,20 +84,12 @@ final routerProvider = Provider<GoRouter>((Ref ref) {
       GoRoute(
         path: RoutePaths.passwordReset,
         pageBuilder: (BuildContext context, GoRouterState state) =>
-            buildNebulaPage(
-              context,
-              state,
-              const PasswordResetRequestScreen(),
-            ),
+            buildNebulaPage(context, state, const PasswordResetRequestScreen()),
       ),
       GoRoute(
         path: RoutePaths.passwordResetConfirm,
         pageBuilder: (BuildContext context, GoRouterState state) =>
-            buildNebulaPage(
-              context,
-              state,
-              const PasswordResetConfirmScreen(),
-            ),
+            buildNebulaPage(context, state, const PasswordResetConfirmScreen()),
       ),
       StatefulShellRoute.indexedStack(
         builder:

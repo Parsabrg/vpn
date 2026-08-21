@@ -23,8 +23,6 @@ final deviceIdStoreProvider = Provider<DeviceIdStore>((Ref ref) {
   return SharedPreferencesDeviceIdStore(ref.watch(sharedPreferencesProvider));
 });
 
-final themePreferenceStoreProvider = Provider<ThemePreferenceStore>((
-  Ref ref,
-) {
+final themePreferenceStoreProvider = Provider<ThemePreferenceStore>((Ref ref) {
   return SharedPreferencesThemeStore(ref.watch(sharedPreferencesProvider));
 });

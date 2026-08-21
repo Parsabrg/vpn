@@ -8,6 +8,7 @@ import 'package:nebula_mobile/core/auth/user_principal.dart';
 import 'package:nebula_mobile/core/network/api_exception.dart';
 import 'package:nebula_mobile/core/storage/device_id_store.dart';
 import 'package:nebula_mobile/core/storage/secure_token_store.dart';
+import 'package:nebula_mobile/core/storage/storage_providers.dart';
 
 import 'fake_auth_repository.dart';
 
@@ -52,9 +53,7 @@ void main() {
       final harness = _harness();
       addTearDown(harness.container.dispose);
 
-      await harness.container
-          .read(authNotifierProvider.notifier)
-          .bootstrap();
+      await harness.container.read(authNotifierProvider.notifier).bootstrap();
 
       expect(
         harness.container.read(authNotifierProvider),
@@ -63,39 +62,31 @@ void main() {
       expect(harness.repository.refreshCalls, 0);
     });
 
-    test(
-      'with a stored refresh token that resolves lands authenticated and '
-      'loads the principal',
-      () async {
-        final harness = _harness();
-        addTearDown(harness.container.dispose);
-        await harness.tokenStore.writeRefreshToken('stored-refresh');
-        harness.repository.refreshResult = () =>
-            _tokens(access: 'fresh-access', refresh: 'rotated-refresh');
-        harness.repository.meResult = () => const UserPrincipal(
-          userId: 'user-1',
-          sessionId: 'session-1',
-          deviceId: 'device-1',
-        );
+    test('with a stored refresh token that resolves lands authenticated and '
+        'loads the principal', () async {
+      final harness = _harness();
+      addTearDown(harness.container.dispose);
+      await harness.tokenStore.writeRefreshToken('stored-refresh');
+      harness.repository.refreshResult = () =>
+          _tokens(access: 'fresh-access', refresh: 'rotated-refresh');
+      harness.repository.meResult = () => const UserPrincipal(
+        userId: 'user-1',
+        sessionId: 'session-1',
+        deviceId: 'device-1',
+      );
 
-        await harness.container
-            .read(authNotifierProvider.notifier)
-            .bootstrap();
-        // Let the fire-and-forget `_loadMe` call resolve.
-        await Future<void>.delayed(Duration.zero);
+      await harness.container.read(authNotifierProvider.notifier).bootstrap();
+      // Let the fire-and-forget `_loadMe` call resolve.
+      await Future<void>.delayed(Duration.zero);
 
-        final AuthState state = harness.container.read(authNotifierProvider);
-        expect(state, isA<AuthAuthenticated>());
-        final AuthAuthenticated authenticated = state as AuthAuthenticated;
-        expect(authenticated.tokens.accessToken, 'fresh-access');
-        expect(authenticated.me?.deviceId, 'device-1');
-        expect(
-          await harness.tokenStore.readRefreshToken(),
-          'rotated-refresh',
-        );
-        expect(harness.deviceIdStore.read(), 'device-1');
-      },
-    );
+      final AuthState state = harness.container.read(authNotifierProvider);
+      expect(state, isA<AuthAuthenticated>());
+      final AuthAuthenticated authenticated = state as AuthAuthenticated;
+      expect(authenticated.tokens.accessToken, 'fresh-access');
+      expect(authenticated.me?.deviceId, 'device-1');
+      expect(await harness.tokenStore.readRefreshToken(), 'rotated-refresh');
+      expect(harness.deviceIdStore.read(), 'device-1');
+    });
 
     test('with a stored refresh token that fails clears storage', () async {
       final harness = _harness();
@@ -106,9 +97,7 @@ void main() {
         detail: 'Authentication was not accepted',
       );
 
-      await harness.container
-          .read(authNotifierProvider.notifier)
-          .bootstrap();
+      await harness.container.read(authNotifierProvider.notifier).bootstrap();
 
       expect(
         harness.container.read(authNotifierProvider),
@@ -123,11 +112,8 @@ void main() {
       final harness = _harness();
       addTearDown(harness.container.dispose);
       harness.repository.loginResult = () => _tokens();
-      harness.repository.meResult = () => const UserPrincipal(
-        userId: 'u',
-        sessionId: 's',
-        deviceId: 'd',
-      );
+      harness.repository.meResult = () =>
+          const UserPrincipal(userId: 'u', sessionId: 's', deviceId: 'd');
 
       await harness.container
           .read(authNotifierProvider.notifier)
@@ -148,21 +134,33 @@ void main() {
     test('failure leaves state unauthenticated and rethrows', () async {
       final harness = _harness();
       addTearDown(harness.container.dispose);
+      final AuthNotifier notifier = harness.container.read(
+        authNotifierProvider.notifier,
+      );
+      // In the real app, the sign-in screen (and therefore login()) is only
+      // reachable once bootstrap has already resolved to Unauthenticated --
+      // reproduce that precondition rather than calling login() against a
+      // freshly-built notifier still sitting in the default Authenticating
+      // state.
+      await notifier.bootstrap();
+      expect(
+        harness.container.read(authNotifierProvider),
+        isA<AuthUnauthenticated>(),
+      );
+
       harness.repository.loginError = const NebulaApiException(
         statusCode: 401,
         detail: 'Authentication was not accepted',
       );
 
       await expectLater(
-        harness.container
-            .read(authNotifierProvider.notifier)
-            .login(
-              identifier: 'user@example.com',
-              password: 'wrong-password',
-              deviceName: 'test device',
-              platform: DevicePlatform.android,
-              clientVersion: '0.1.0',
-            ),
+        notifier.login(
+          identifier: 'user@example.com',
+          password: 'wrong-password',
+          deviceName: 'test device',
+          platform: DevicePlatform.android,
+          clientVersion: '0.1.0',
+        ),
         throwsA(isA<NebulaApiException>()),
       );
       expect(
@@ -208,29 +206,32 @@ void main() {
   });
 
   group('AuthNotifier.logout', () {
-    test('always lands unauthenticated even if the network call fails', () async {
-      final harness = _harness();
-      addTearDown(harness.container.dispose);
-      final AuthNotifier notifier = harness.container.read(
-        authNotifierProvider.notifier,
-      );
-      await harness.tokenStore.writeRefreshToken('current-refresh');
-      harness.repository.refreshResult = () =>
-          _tokens(refresh: 'current-refresh');
-      await notifier.bootstrap();
-      expect(
-        harness.container.read(authNotifierProvider),
-        isA<AuthAuthenticated>(),
-      );
+    test(
+      'always lands unauthenticated even if the network call fails',
+      () async {
+        final harness = _harness();
+        addTearDown(harness.container.dispose);
+        final AuthNotifier notifier = harness.container.read(
+          authNotifierProvider.notifier,
+        );
+        await harness.tokenStore.writeRefreshToken('current-refresh');
+        harness.repository.refreshResult = () =>
+            _tokens(refresh: 'current-refresh');
+        await notifier.bootstrap();
+        expect(
+          harness.container.read(authNotifierProvider),
+          isA<AuthAuthenticated>(),
+        );
 
-      await notifier.logout();
+        await notifier.logout();
 
-      expect(
-        harness.container.read(authNotifierProvider),
-        isA<AuthUnauthenticated>(),
-      );
-      expect(await harness.tokenStore.readRefreshToken(), isNull);
-      expect(harness.repository.logoutCalls, 1);
-    });
+        expect(
+          harness.container.read(authNotifierProvider),
+          isA<AuthUnauthenticated>(),
+        );
+        expect(await harness.tokenStore.readRefreshToken(), isNull);
+        expect(harness.repository.logoutCalls, 1);
+      },
+    );
   });
 }

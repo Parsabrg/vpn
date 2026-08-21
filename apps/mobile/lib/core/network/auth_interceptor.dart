@@ -88,9 +88,7 @@ class AuthInterceptor extends Interceptor {
         },
       );
       final Dio dio = _ref.read(dioProvider);
-      final Response<dynamic> response = await dio.fetch<dynamic>(
-        retryOptions,
-      );
+      final Response<dynamic> response = await dio.fetch<dynamic>(retryOptions);
       handler.resolve(response);
     } on DioException catch (retryError) {
       // Refresh succeeded but the retried request itself failed again --

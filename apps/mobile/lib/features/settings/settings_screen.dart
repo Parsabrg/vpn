@@ -41,9 +41,7 @@ class SettingsScreen extends ConsumerWidget {
                 ],
                 selected: <ThemeMode>{mode},
                 onSelectionChanged: (Set<ThemeMode> selection) {
-                  ref
-                      .read(themeModeProvider.notifier)
-                      .setMode(selection.first);
+                  ref.read(themeModeProvider.notifier).setMode(selection.first);
                 },
               ),
             ),

@@ -16,8 +16,7 @@ void main() {
     // crash on first frame; behavior for each auth state is covered by
     // `test/core/routing/app_router_test.dart`.
     SharedPreferences.setMockInitialValues(<String, Object>{});
-    final SharedPreferences preferences =
-        await SharedPreferences.getInstance();
+    final SharedPreferences preferences = await SharedPreferences.getInstance();
 
     await tester.pumpWidget(
       ProviderScope(

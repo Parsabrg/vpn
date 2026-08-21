@@ -88,9 +88,7 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                     PasswordField(
                       controller: _passwordController,
                       labelText: 'New password',
-                      autofillHints: const <String>[
-                        AutofillHints.newPassword,
-                      ],
+                      autofillHints: const <String>[AutofillHints.newPassword],
                       validator: (String? value) =>
                           (value == null || value.length < 12)
                           ? 'Use at least 12 characters'
@@ -110,16 +108,12 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
                     ],
                     const SizedBox(height: 24),
                     FilledButton(
-                      onPressed: state is SubmissionInProgress
-                          ? null
-                          : _submit,
+                      onPressed: state is SubmissionInProgress ? null : _submit,
                       child: state is SubmissionInProgress
                           ? const SizedBox(
                               height: 20,
                               width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Text('Activate'),
                     ),

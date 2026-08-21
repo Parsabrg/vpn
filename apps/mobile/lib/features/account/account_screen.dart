@@ -30,10 +30,9 @@ class AccountScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           FilledButton.tonalIcon(
-            onPressed: () =>
-                ref.read(authNotifierProvider.notifier).logout(),
+            onPressed: () => ref.read(authNotifierProvider.notifier).logout(),
             icon: const Icon(Icons.logout),
-            label: const Semantics(
+            label: Semantics(
               label: 'Sign out of your Nebula VPN account',
               child: Text('Sign out'),
             ),

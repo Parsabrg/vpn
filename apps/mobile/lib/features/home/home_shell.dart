@@ -15,8 +15,10 @@ class HomeShell extends StatelessWidget {
       body: navigationShell,
       bottomNavigationBar: NavigationBar(
         selectedIndex: navigationShell.currentIndex,
-        onDestinationSelected: (int index) =>
-            navigationShell.goBranch(index, initialLocation: index == navigationShell.currentIndex),
+        onDestinationSelected: (int index) => navigationShell.goBranch(
+          index,
+          initialLocation: index == navigationShell.currentIndex,
+        ),
         destinations: const <NavigationDestination>[
           NavigationDestination(
             icon: Icon(Icons.devices_outlined),

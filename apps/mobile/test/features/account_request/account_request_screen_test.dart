@@ -23,10 +23,7 @@ Future<void> _pumpAndSubmit(
     ),
   );
 
-  await tester.enterText(
-    find.byType(TextFormField).first,
-    'user@example.com',
-  );
+  await tester.enterText(find.byType(TextFormField).first, 'user@example.com');
   await tester.tap(find.widgetWithText(FilledButton, 'Submit request'));
   await tester.pumpAndSettle();
 }

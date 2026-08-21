@@ -125,8 +125,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                     Align(
                       alignment: Alignment.centerRight,
                       child: TextButton(
-                        onPressed: () =>
-                            context.go(RoutePaths.passwordReset),
+                        onPressed: () => context.go(RoutePaths.passwordReset),
                         child: const Text('Forgot password?'),
                       ),
                     ),
@@ -149,9 +148,7 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                           ? const SizedBox(
                               height: 20,
                               width: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                              ),
+                              child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Text('Sign in'),
                     ),

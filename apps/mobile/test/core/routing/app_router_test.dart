@@ -62,7 +62,11 @@ void main() {
     addTearDown(container.dispose);
 
     await tester.pumpWidget(_appFor(container));
-    await tester.pumpAndSettle();
+    // Not pumpAndSettle: the splash screen's CircularProgressIndicator
+    // animates indefinitely by design (bootstrap has no fixed duration), so
+    // it never "settles" -- a single pump is enough to resolve the initial
+    // route and render the screen.
+    await tester.pump();
 
     expect(find.byType(SplashScreen), findsOneWidget);
   });

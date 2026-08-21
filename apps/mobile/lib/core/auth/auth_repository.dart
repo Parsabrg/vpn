@@ -37,10 +37,7 @@ abstract interface class AuthRepository {
     required String newPassword,
   });
 
-  Future<void> submitAccountRequest({
-    required String email,
-    String? username,
-  });
+  Future<void> submitAccountRequest({required String email, String? username});
 
   Future<void> activateAccount({
     required String token,
@@ -62,22 +59,24 @@ class DioAuthRepository implements AuthRepository {
     required DevicePlatform platform,
     required String clientVersion,
   }) async {
-    final Response<dynamic> response = await _post('/v1/auth/login', <String, dynamic>{
-      'identifier': identifier,
-      'password': password,
-      'device_id': deviceId,
-      'device_name': deviceName,
-      'platform': platform.wireValue,
-      'client_version': clientVersion,
-    });
+    final Response<dynamic> response =
+        await _post('/v1/auth/login', <String, dynamic>{
+          'identifier': identifier,
+          'password': password,
+          'device_id': deviceId,
+          'device_name': deviceName,
+          'platform': platform.wireValue,
+          'client_version': clientVersion,
+        });
     return _tokenPairFrom(response.data as Map<String, dynamic>);
   }
 
   @override
   Future<TokenPair> refresh(String refreshToken) async {
-    final Response<dynamic> response = await _post('/v1/auth/refresh', <String, dynamic>{
-      'refresh_token': refreshToken,
-    });
+    final Response<dynamic> response = await _post(
+      '/v1/auth/refresh',
+      <String, dynamic>{'refresh_token': refreshToken},
+    );
     return _tokenPairFrom(response.data as Map<String, dynamic>);
   }
 
@@ -133,7 +132,7 @@ class DioAuthRepository implements AuthRepository {
   }) async {
     await _post('/v1/account-requests/', <String, dynamic>{
       'email': email,
-      if (username != null) 'username': username,
+      'username': ?username,
     });
   }
 

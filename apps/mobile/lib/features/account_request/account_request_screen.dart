@@ -119,9 +119,7 @@ class _RequestForm extends StatelessWidget {
           const SizedBox(height: 16),
           TextFormField(
             controller: usernameController,
-            decoration: const InputDecoration(
-              labelText: 'Username (optional)',
-            ),
+            decoration: const InputDecoration(labelText: 'Username (optional)'),
           ),
           if (errorMessage != null) ...<Widget>[
             const SizedBox(height: 16),

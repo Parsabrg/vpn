@@ -18,10 +18,8 @@ void main() {
         });
 
         // Five callers arrive before the underlying call resolves.
-        final List<Future<TokenPair>> pending = List<Future<TokenPair>>.generate(
-          5,
-          (_) => refresher.refresh(),
-        );
+        final List<Future<TokenPair>> pending =
+            List<Future<TokenPair>>.generate(5, (_) => refresher.refresh());
 
         // No caller has resolved yet, but the underlying call must have
         // fired exactly once.
