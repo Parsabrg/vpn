@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { getUserDetail } from "@/lib/users";
+import { listUserAssignments, listUserPermissions } from "@/lib/access";
+import { listProtocolProfiles, listVpnServers } from "@/lib/topology";
 import { UserStatusControl } from "@/components/user-status-control";
 import { DeviceRow } from "@/components/device-row";
 import { SessionRow } from "@/components/session-row";
+import { PermissionsPanel } from "@/components/permissions-panel";
+import { AssignmentsPanel } from "@/components/assignments-panel";
 
 export const metadata: Metadata = {
   title: "User detail",
@@ -20,6 +24,12 @@ export default async function UserDetailPage({
     notFound();
   }
   const { user, devices, sessions } = detail;
+  const [permissions, assignments, profiles, servers] = await Promise.all([
+    listUserPermissions(user.id),
+    listUserAssignments(user.id),
+    listProtocolProfiles(),
+    listVpnServers(),
+  ]);
 
   return (
     <>
@@ -110,6 +120,24 @@ export default async function UserDetailPage({
             </tbody>
           </table>
         )}
+      </section>
+
+      <section aria-labelledby="permissions-title">
+        <h2 id="permissions-title">Permissions</h2>
+        <PermissionsPanel
+          userId={user.id}
+          initialPermissions={permissions}
+          profiles={profiles}
+        />
+      </section>
+
+      <section aria-labelledby="assignments-title">
+        <h2 id="assignments-title">Assignments</h2>
+        <AssignmentsPanel
+          userId={user.id}
+          initialAssignments={assignments}
+          servers={servers}
+        />
       </section>
     </>
   );
