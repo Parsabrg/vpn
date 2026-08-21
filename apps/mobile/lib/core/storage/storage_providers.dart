@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'device_id_store.dart';
 import 'secure_token_store.dart';
 import 'theme_preference_store.dart';
+import 'wireguard_key_store.dart';
 
 /// Must be overridden in `main()` with the real instance after awaiting
 /// `SharedPreferences.getInstance()` -- reading it before that override is
@@ -25,4 +26,8 @@ final deviceIdStoreProvider = Provider<DeviceIdStore>((Ref ref) {
 
 final themePreferenceStoreProvider = Provider<ThemePreferenceStore>((Ref ref) {
   return SharedPreferencesThemeStore(ref.watch(sharedPreferencesProvider));
+});
+
+final wireGuardKeyStoreProvider = Provider<WireGuardKeyStore>((Ref ref) {
+  return FlutterWireGuardKeyStore();
 });

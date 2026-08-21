@@ -7,10 +7,11 @@ import 'package:nebula_mobile/core/auth/auth_state.dart';
 import 'package:nebula_mobile/core/auth/token_pair.dart';
 import 'package:nebula_mobile/core/routing/app_router.dart';
 import 'package:nebula_mobile/core/routing/route_paths.dart';
+import 'package:nebula_mobile/core/servers/server_repository.dart';
 import 'package:nebula_mobile/core/storage/storage_providers.dart';
 import 'package:nebula_mobile/features/account_request/account_request_screen.dart';
 import 'package:nebula_mobile/features/auth/sign_in_screen.dart';
-import 'package:nebula_mobile/features/devices/devices_placeholder_screen.dart';
+import 'package:nebula_mobile/features/devices/devices_screen.dart';
 import 'package:nebula_mobile/features/splash/splash_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -28,6 +29,28 @@ class _TestAuthNotifier extends AuthNotifier {
   void emit(AuthState next) => state = next;
 }
 
+/// Avoids DevicesScreen's initState firing a real network call against
+/// dioProvider's base URL, which this router-level test has no interest in
+/// exercising.
+class _FakeServerRepository implements ServerRepository {
+  @override
+  Future<List<AvailableServer>> listAvailableServers() async =>
+      <AvailableServer>[];
+
+  @override
+  Future<WireGuardPeerResult> requestPeer({
+    required String deviceId,
+    required String serverCode,
+    required String publicKey,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<void> revokePeer({
+    required String deviceId,
+    required String serverCode,
+  }) => throw UnimplementedError();
+}
+
 const TokenPair _authenticatedTokens = TokenPair(
   accessToken: 'access',
   refreshToken: 'refresh',
@@ -41,6 +64,7 @@ Future<ProviderContainer> _containerWith(AuthState initial) async {
     overrides: <Override>[
       sharedPreferencesProvider.overrideWithValue(preferences),
       authNotifierProvider.overrideWith(() => _TestAuthNotifier(initial)),
+      serverRepositoryProvider.overrideWithValue(_FakeServerRepository()),
     ],
   );
 }
@@ -114,7 +138,7 @@ void main() {
     await tester.pumpWidget(_appFor(container));
     await tester.pumpAndSettle();
 
-    expect(find.byType(DevicesPlaceholderScreen), findsOneWidget);
+    expect(find.byType(DevicesScreen), findsOneWidget);
   });
 
   testWidgets('a live session-expiry bounces the user back to sign-in', (
@@ -127,7 +151,7 @@ void main() {
 
     await tester.pumpWidget(_appFor(container));
     await tester.pumpAndSettle();
-    expect(find.byType(DevicesPlaceholderScreen), findsOneWidget);
+    expect(find.byType(DevicesScreen), findsOneWidget);
 
     final _TestAuthNotifier notifier =
         container.read(authNotifierProvider.notifier) as _TestAuthNotifier;

@@ -6,15 +6,21 @@ themed, routed, stateful app covering the account lifecycle end to end:
 account requests, activation, sign-in, password reset, and an authenticated
 home shell with account and settings screens, all wired to the real API.
 
-Device connection (WireGuard) is still an honest empty state -- the API has
-no public endpoint yet for a user to discover which server/profile they're
-allowed to use, so that screen names the Phase 1.7b dependency instead of
-faking a device list. See `docs/phase-1-plan.md` and `PROJECT_PROGRESS.md`
-at the repository root for the exact status.
+Phase 1.7b adds device connection: the devices screen calls the API's
+`GET /v1/servers/` to list the server/profiles the signed-in user is
+permitted to use, generates a Curve25519 WireGuard identity on-device
+(`package:cryptography`'s pure-Dart X25519 -- no native code needed), and
+calls `POST /v1/devices/{id}/wireguard-peer` (and its `/revoke` counterpart)
+to provision or release a peer. Provisioning a peer registers the device
+with the server; it does not establish a live tunnel yet, and the screen
+says so explicitly -- that needs native Android/Windows platform
+integration this app doesn't have (see below).
 
 Android and Windows runner projects are still deferred until the owner
-confirms the minimum supported OS versions. This phase stays Dart-only and
-fully exercised by `flutter test` -- no device or emulator is needed.
+confirms the minimum supported OS versions. This app stays Dart-only and
+fully exercised by `flutter test` -- no device or emulator is needed. See
+`docs/phase-1-plan.md` and `PROJECT_PROGRESS.md` at the repository root for
+the exact status.
 
 ## Layout
 
