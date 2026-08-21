@@ -135,9 +135,6 @@ def test_concurrent_grants_produce_exactly_one_permission_row_and_audit_event() 
                     {"id": user_id},
                 )
                 await connection.execute(
-                    text("DELETE FROM audit_logs WHERE actor_id = :id"), {"id": admin_id}
-                )
-                await connection.execute(
                     text("DELETE FROM protocol_profiles WHERE id = :id"), {"id": profile_id}
                 )
                 await connection.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
@@ -246,9 +243,6 @@ def test_concurrent_assigns_produce_exactly_one_active_assignment_row() -> None:
                 await connection.execute(
                     text("DELETE FROM user_server_assignments WHERE user_id = :id"),
                     {"id": user_id},
-                )
-                await connection.execute(
-                    text("DELETE FROM audit_logs WHERE actor_id = :id"), {"id": admin_id}
                 )
                 await connection.execute(
                     text("DELETE FROM vpn_servers WHERE id = :id"), {"id": server_id}
