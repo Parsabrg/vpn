@@ -4,22 +4,22 @@ Last updated: 2026-08-21
 
 ## Current phase
 
-Phase 1.7a — Flutter foundation and account lifecycle (`apps/mobile`:
-Material 3 theming, hand-written Riverpod state, GoRouter with an
-auth-gated redirect, a Dio client with token-refresh serialization, secure
-refresh-token storage, and the splash/sign-in/account-request/activation/
-password-reset/home/account/settings screens wired to the real API),
-implemented for review. Phase 1.1 was squash-merged in pull request #2,
-Phase 1.2 in pull request #5, Phase 1.3 in pull request #10, Phase 1.4 in
-pull request #24, Phase 1.5 in pull request #28, Phase 1.6a
-(`services/vpn-agent`) in pull request #30, and Phase 1.6b (control-plane
-VPN provisioning) in pull request #31. Phase 1.7a is a deliberately
-narrowed first half of the documented Phase 1.7: the device-connection
-screens and WireGuard "connect" flow are Phase 1.7b, because the API has no
-public endpoint yet for a user to discover which server/profile they're
-allowed to use (`POST /v1/devices/{id}/wireguard-peer` requires a
-`server_code`; only an admin-only listing route exists today). This mirrors
-how Phase 1.6 itself was split into 1.6a/1.6b along a natural boundary.
+Phase 1.7b — device connection (`apps/mobile`: a real devices screen
+replacing Phase 1.7a's placeholder, calling the new
+`GET /v1/servers/` endpoint to let a user pick a server/profile, generating
+a WireGuard identity on-device, and calling the existing
+`POST /v1/devices/{id}/wireguard-peer` (request/revoke) API), implemented
+for review on top of the not-yet-merged Phase 1.7a branch. Phase 1.1 was
+squash-merged in pull request #2, Phase 1.2 in pull request #5, Phase 1.3 in
+pull request #10, Phase 1.4 in pull request #24, Phase 1.5 in pull request
+#28, Phase 1.6a (`services/vpn-agent`) in pull request #30, and Phase 1.6b
+(control-plane VPN provisioning) in pull request #31. Phase 1.7a (Flutter
+foundation and account lifecycle) is implemented for review in pull request
+#38; this phase's API half (the new `GET /v1/servers/` endpoint) is
+implemented for review in pull request #39. Phase 1.7b's mobile half
+(this entry) depends on both and is branched from Phase 1.7a's branch
+rather than `main`, since it needs 1.7a's routing/state/screens that
+haven't merged yet.
 
 ## Completed
 
@@ -184,6 +184,29 @@ how Phase 1.6 itself was split into 1.6a/1.6b along a natural boundary.
   the theme-mode control; Devices is an honest empty state naming the
   Phase 1.7b server-discovery dependency instead of faking a device list,
   mirroring `apps/admin`'s Phase 1.5 empty-state precedent.
+- Added a new `services/api` endpoint, `GET /v1/servers/`
+  (`nebula_api/servers/`), bearer-token gated: joins
+  `user_server_assignments -> vpn_servers -> server_protocol_capabilities ->
+  protocol_profiles -> user_protocol_permissions` scoped to the caller's own
+  `user_id`, returning a server/profile only when every one of those rows is
+  active/enabled/unexpired. This is what Phase 1.7a's Flutter devices
+  placeholder was waiting on. Proven correct against real PostgreSQL (per-user
+  isolation, a disabled permission hiding an otherwise-eligible server) --
+  the fixture setup hit two real schema constraints (a closed,
+  singleton-paired `protocols.code` vocabulary; a nulls-not-distinct unique
+  constraint on `protocol_profiles`) only CI's real Postgres could catch,
+  since this development machine has none.
+- Replaced `apps/mobile`'s Phase 1.7a devices placeholder with a real
+  screen: loads `GET /v1/servers/`, lets the user pick a server and
+  protocol profile, generates a Curve25519 WireGuard identity on-device
+  (`package:cryptography`'s pure-Dart X25519 -- no native platform code,
+  keeping this app Dart-only) persisted in secure storage and reused across
+  connect attempts, and calls the existing
+  `POST /v1/devices/{id}/wireguard-peer` (request) and `.../revoke` API.
+  The "connected" view is explicit that provisioning a peer registers the
+  device with the server but does not establish a live tunnel -- that needs
+  native platform integration this app doesn't have yet -- rather than
+  implying a working VPN connection that doesn't exist.
 
 ## Validation recorded locally
 
@@ -245,6 +268,23 @@ how Phase 1.6 itself was split into 1.6a/1.6b along a natural boundary.
   `actions/dependency-review-action`, and switching would need auditing
   every ecosystem in this repo -- npm, pip, GitHub Actions -- not just the
   new Dart packages, which is out of scope for a Flutter-only phase).
+- Phase 1.7b's API half (`GET /v1/servers/`, pull request #39): Ruff,
+  format, and strict mypy pass; 7 new unit/route tests pass locally and 2
+  new real-Postgres integration tests (gated on `NEBULA_DATABASE_URL`, not
+  configured on this machine -- Docker Desktop and a native PostgreSQL 17
+  install both failed to start here, no admin/UAC elevation available in
+  this sandbox) skip cleanly locally and are confirmed passing by the PR's
+  own CI. Their first version had two real schema-constraint bugs (see
+  "Completed" above) that only that CI run caught.
+- Phase 1.7b's mobile half (devices screen): `dart format`, `flutter
+  analyze --fatal-infos`, and `flutter test` (44 tests, +14 over Phase
+  1.7a's 30: WireGuard key-pair generation/reconstruction against the
+  real `package:cryptography` X25519 implementation, `DevicesController`
+  load/connect/disconnect state transitions, and devices-screen empty/
+  picker/connected rendering) all pass locally with the same bootstrapped
+  Flutter 3.44.9 toolchain used for Phase 1.7a. Not yet confirmed by this
+  branch's own CI run (no PR opened yet as of this entry) -- flagging that
+  distinction rather than claiming a CI result that doesn't exist yet.
 - GitHub Action references use full commit SHAs.
 
 The local machine did not have Flutter or a running Docker daemon. Flutter analysis,
@@ -269,16 +309,24 @@ rather than something to change while it is providing real coverage.
 
 ## Next milestone
 
-- Review and merge Phase 1.7a after all CI checks pass, including the
-  Flutter job (`.github/workflows/flutter.yml`) that has not run locally.
-- Begin Phase 1.7b: add a public, permission-scoped server/profile
-  discovery endpoint to `services/api` (there is currently no non-admin way
-  for a user to learn which `server_code` values they're allowed to use),
-  then build the devices list, WireGuard connect flow, and remaining
-  connection-state screens against it and the existing
-  `POST /v1/devices/{device_id}/wireguard-peer` API.
+- Review and merge Phase 1.7a (pull request #38) and Phase 1.7b's API half
+  (pull request #39), then rebase/merge Phase 1.7b's mobile half (devices
+  screen) onto `main` once both land -- it is currently branched from
+  Phase 1.7a's branch, not `main`, since it depends on routing/state/
+  screens that haven't merged yet.
+- No CLI seed data exists yet for `user_server_assignments`/
+  `user_protocol_permissions`, so `GET /v1/servers/` has nothing to return
+  for any real user today -- the devices screen's "no servers assigned"
+  empty state is what every account will actually see until an
+  administrator grants an assignment via the existing
+  `grant-user-access`/`create-vpn-server` CLI seed commands. Worth a
+  documented manual verification pass (seed a server + assignment,
+  confirm the picker/connect/disconnect flow end to end) once a real VPS
+  and Postgres are available, since this development machine has neither.
 - Generate Android and Windows host projects after support versions are
-  confirmed.
+  confirmed -- that unblocks real native WireGuard tunnel establishment,
+  which the devices screen's "peer provisioned, not yet tunneling" wording
+  is deliberately honest about not having yet.
 
 ## Known limitations
 
@@ -288,11 +336,19 @@ rather than something to change while it is providing real coverage.
   reconciliation, and a user-facing peer-request API) all exist. Xray
   runtime integration, native client tunnel integration, backup, and
   production deployment do not exist yet.
-- The Flutter app now exists and handles the full account lifecycle, but
-  does not yet call the WireGuard peer-request API -- its devices screen is
-  an honest empty state pending Phase 1.7b's server-discovery endpoint.
-- No client application exists yet to call the new WireGuard peer-request
-  API for a real connection -- that remains Phase 1.7b's job.
+- The Flutter app now calls the full WireGuard provisioning path (server
+  discovery, peer request, peer revoke), but provisioning a peer only
+  registers the device with the server -- it does not establish a live
+  tunnel. That needs native Android/Windows platform integration (a TUN
+  interface, `wg`/`wg-quick` or equivalent), which this app does not have
+  yet since it has no native runner projects at all (see "Next milestone").
+  The devices screen says this explicitly rather than implying a working
+  VPN connection.
+- No `user_server_assignments`/`user_protocol_permissions` rows exist for
+  any real user yet -- only the CLI seed commands below can create them, and
+  none have been run against a real deployment. Every account will see the
+  devices screen's "no servers assigned yet" empty state until that
+  changes.
 - Creating a `vpn_servers` row, seeding the WireGuard protocol/profile, and
   granting permissions/assignments is done via CLI seed commands
   (`nebula-api seed-wireguard-protocol|create-vpn-server|grant-user-access`),

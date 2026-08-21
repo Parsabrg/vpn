@@ -7,16 +7,20 @@ the data model, agent API, and clients ready for phased Xray support.
 
 ## Current status
 
-Phases 0 through 1.6b are merged. **Phase 1.7a: Flutter foundation and
-account lifecycle** is implemented for review. The Flutter client now has
-Material 3 theming, Riverpod state, GoRouter routing, a Dio client with
-token-refresh serialization, secure refresh-token storage, and screens for
-account request, activation, sign-in, password reset, and an authenticated
-home shell (account, settings, and an honest devices placeholder). Device
-connection/WireGuard "connect", native Android/Windows clients, Xray
-runtime integration, backup, and production deployment remain later
-milestones. See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for the exact
-status.
+Phases 0 through 1.6b are merged. **Phase 1.7: Flutter client and device
+connection** is implemented for review across three pull requests (1.7a:
+Flutter foundation and account lifecycle; 1.7b: a `GET /v1/servers/`
+discovery endpoint plus the devices/WireGuard-connect screen that depends
+on it). The Flutter client now has Material 3 theming, Riverpod state,
+GoRouter routing, a Dio client with token-refresh serialization, secure
+credential storage, the full account lifecycle (request, activation,
+sign-in, password reset), and a devices screen that provisions a WireGuard
+peer on a chosen server/profile. Provisioning a peer registers the device
+with the server; it does not establish a live tunnel yet, since that needs
+native Android/Windows platform integration this app doesn't have. Native
+clients, Xray runtime integration, backup, and production deployment
+remain later milestones. See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md)
+for the exact status.
 
 ## Design principles
 

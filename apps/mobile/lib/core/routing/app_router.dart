@@ -6,7 +6,7 @@ import '../../features/account/account_screen.dart';
 import '../../features/account_request/account_request_screen.dart';
 import '../../features/activation/activation_screen.dart';
 import '../../features/auth/sign_in_screen.dart';
-import '../../features/devices/devices_placeholder_screen.dart';
+import '../../features/devices/devices_screen.dart';
 import '../../features/home/home_shell.dart';
 import '../../features/password_reset/password_reset_confirm_screen.dart';
 import '../../features/password_reset/password_reset_request_screen.dart';
@@ -104,7 +104,7 @@ final routerProvider = Provider<GoRouter>((Ref ref) {
               GoRoute(
                 path: RoutePaths.homeDevices,
                 builder: (BuildContext context, GoRouterState state) =>
-                    const DevicesPlaceholderScreen(),
+                    const DevicesScreen(),
               ),
             ],
           ),
