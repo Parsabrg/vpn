@@ -27,7 +27,6 @@ def test_visible_only_with_active_assignment_capability_and_permission() -> None
     unique = uuid4().hex[:12]
     eligible_user_id = uuid4()
     other_user_id = uuid4()
-    protocol_id = uuid4()
     profile_id = uuid4()
     server_id = uuid4()
 
@@ -43,22 +42,40 @@ def test_visible_only_with_active_assignment_capability_and_permission() -> None
                     ),
                     {"id": user_id, "email": f"user-{user_id.hex[:8]}-{unique}@example.test"},
                 )
+            # protocols.code is a closed vocabulary (CHECK ck_protocols_code_engine_pair
+            # additionally pins 'wireguard' <-> 'native_wireguard' as a 1:1 singleton) --
+            # it cannot be uniquified per test run. Reuse the shared 'vless'/'xray' row
+            # instead (idempotent insert + lookup), which carries no such pairing.
             await connection.execute(
                 text(
                     "INSERT INTO protocols (id, code, display_name, engine, is_user_selectable) "
-                    "VALUES (:id, :code, 'WireGuard', 'native_wireguard', true)"
+                    "VALUES (:id, 'vless', 'VLESS', 'xray', true) "
+                    "ON CONFLICT (code) DO NOTHING"
                 ),
-                {"id": protocol_id, "code": f"wireguard-{unique}"},
+                {"id": uuid4()},
             )
+            protocol_id = await connection.scalar(
+                text("SELECT id FROM protocols WHERE code = 'vless'")
+            )
+            # protocol_profiles has a nulls-not-distinct unique constraint across
+            # (protocol_id, transport, transport_security, flow, template_key,
+            # template_version) -- since protocol_id is now the shared 'vless' row
+            # reused across test runs, template_key must be set to something unique
+            # per run or two rows with all-NULL tuple columns would collide.
             await connection.execute(
                 text(
                     "INSERT INTO protocol_profiles "
                     "(id, protocol_id, code, version, display_name, state, requires_udp, "
-                    "is_full_tunnel) VALUES "
-                    "(:id, :protocol_id, :code, 1, 'WireGuard default', 'implemented', true, "
-                    "true)"
+                    "is_full_tunnel, template_key) VALUES "
+                    "(:id, :protocol_id, :code, 1, 'Test profile', 'implemented', true, "
+                    "true, :template_key)"
                 ),
-                {"id": profile_id, "protocol_id": protocol_id, "code": f"wg-default-{unique}"},
+                {
+                    "id": profile_id,
+                    "protocol_id": protocol_id,
+                    "code": f"profile-{unique}",
+                    "template_key": f"test-{unique}",
+                },
             )
             await connection.execute(
                 text(
@@ -124,9 +141,8 @@ def test_visible_only_with_active_assignment_capability_and_permission() -> None
                 await connection.execute(
                     text("DELETE FROM protocol_profiles WHERE id = :id"), {"id": profile_id}
                 )
-                await connection.execute(
-                    text("DELETE FROM protocols WHERE id = :id"), {"id": protocol_id}
-                )
+                # The shared 'vless' protocols row is intentionally left in place --
+                # see the ON CONFLICT DO NOTHING insert above.
                 await connection.execute(
                     text("DELETE FROM users WHERE id IN (:eligible, :other)"),
                     {"eligible": eligible_user_id, "other": other_user_id},
@@ -140,7 +156,7 @@ def test_visible_only_with_active_assignment_capability_and_permission() -> None
     assert len(eligible_result) == 1
     assert eligible_result[0].code == f"ams-1-{unique}"
     assert len(eligible_result[0].profiles) == 1
-    assert eligible_result[0].profiles[0].code == f"wg-default-{unique}"
+    assert eligible_result[0].profiles[0].code == f"profile-{unique}"
     # A user with no assignment of their own must never see this server,
     # even though the server/capability/profile rows exist.
     assert other_result == []
@@ -157,7 +173,6 @@ def test_disabled_permission_hides_an_otherwise_eligible_server() -> None:
 
     unique = uuid4().hex[:12]
     user_id = uuid4()
-    protocol_id = uuid4()
     profile_id = uuid4()
     server_id = uuid4()
 
@@ -172,22 +187,33 @@ def test_disabled_permission_hides_an_otherwise_eligible_server() -> None:
                 ),
                 {"id": user_id, "email": f"user-{unique}@example.test"},
             )
+            # See the sibling test above for why 'protocols' rows must reuse the
+            # shared 'vless'/'xray' row rather than a per-test-run unique code.
             await connection.execute(
                 text(
                     "INSERT INTO protocols (id, code, display_name, engine, is_user_selectable) "
-                    "VALUES (:id, :code, 'WireGuard', 'native_wireguard', true)"
+                    "VALUES (:id, 'vless', 'VLESS', 'xray', true) "
+                    "ON CONFLICT (code) DO NOTHING"
                 ),
-                {"id": protocol_id, "code": f"wireguard-{unique}"},
+                {"id": uuid4()},
+            )
+            protocol_id = await connection.scalar(
+                text("SELECT id FROM protocols WHERE code = 'vless'")
             )
             await connection.execute(
                 text(
                     "INSERT INTO protocol_profiles "
                     "(id, protocol_id, code, version, display_name, state, requires_udp, "
-                    "is_full_tunnel) VALUES "
-                    "(:id, :protocol_id, :code, 1, 'WireGuard default', 'implemented', true, "
-                    "true)"
+                    "is_full_tunnel, template_key) VALUES "
+                    "(:id, :protocol_id, :code, 1, 'Test profile', 'implemented', true, "
+                    "true, :template_key)"
                 ),
-                {"id": profile_id, "protocol_id": protocol_id, "code": f"wg-default-{unique}"},
+                {
+                    "id": profile_id,
+                    "protocol_id": protocol_id,
+                    "code": f"profile-{unique}",
+                    "template_key": f"test-{unique}",
+                },
             )
             await connection.execute(
                 text(
@@ -251,9 +277,6 @@ def test_disabled_permission_hides_an_otherwise_eligible_server() -> None:
                 )
                 await connection.execute(
                     text("DELETE FROM protocol_profiles WHERE id = :id"), {"id": profile_id}
-                )
-                await connection.execute(
-                    text("DELETE FROM protocols WHERE id = :id"), {"id": protocol_id}
                 )
                 await connection.execute(text("DELETE FROM users WHERE id = :id"), {"id": user_id})
 
