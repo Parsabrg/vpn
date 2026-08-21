@@ -7,15 +7,16 @@ the data model, agent API, and clients ready for phased Xray support.
 
 ## Current status
 
-Phases 0 through 1.2 are merged. **Phase 1.3: authentication and administrator
-security** is implemented for review. The API now provides separate user and
-administrator realms, rotating user refresh tokens with family-reuse detection,
-immediate session revocation, password reset, administrator TOTP/recovery codes,
-Redis-backed opaque administrator sessions, CSRF protection, lockout, rate limits,
-and redacted security auditing. Account request/approval and reset-email delivery,
-the administrator UI, VPN provisioning, native clients, and production deployment
-remain later milestones. See
-[`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for the exact status.
+Phases 0 through 1.6b are merged. **Phase 1.7a: Flutter foundation and
+account lifecycle** is implemented for review. The Flutter client now has
+Material 3 theming, Riverpod state, GoRouter routing, a Dio client with
+token-refresh serialization, secure refresh-token storage, and screens for
+account request, activation, sign-in, password reset, and an authenticated
+home shell (account, settings, and an honest devices placeholder). Device
+connection/WireGuard "connect", native Android/Windows clients, Xray
+runtime integration, backup, and production deployment remain later
+milestones. See [`PROJECT_PROGRESS.md`](PROJECT_PROGRESS.md) for the exact
+status.
 
 ## Design principles
 
