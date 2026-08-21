@@ -10,6 +10,8 @@ from pydantic import BaseModel, ConfigDict
 from redis.asyncio import Redis
 
 from nebula_api import __version__
+from nebula_api.access.routes import router as access_router
+from nebula_api.access.service import AccessService
 from nebula_api.accounts.email_outbox import EmailOutboxRedisClient
 from nebula_api.accounts.routes import admin_router as account_request_admin_router
 from nebula_api.accounts.routes import router as account_request_router
@@ -65,6 +67,7 @@ def create_app(
     user_management_service: UserManagementService | None = None,
     provisioning_service: ProvisioningService | None = None,
     server_discovery_service: ServerDiscoveryService | None = None,
+    access_service: AccessService | None = None,
     password_reset_delivery: PasswordResetDelivery | None = None,
 ) -> FastAPI:
     """Create an API instance with startup and database-gated readiness."""
@@ -81,6 +84,7 @@ def create_app(
     effective_user_management_service = user_management_service
     effective_provisioning_service = provisioning_service
     effective_server_discovery_service = server_discovery_service
+    effective_access_service = access_service
     effective_readiness_check: ReadinessCheck
 
     if readiness_check is None:
@@ -121,6 +125,12 @@ def create_app(
                 )
             if effective_user_management_service is None:
                 effective_user_management_service = UserManagementService(
+                    create_session_factory(database_engine),
+                    redis_auth_state,
+                    runtime_settings,
+                )
+            if effective_access_service is None:
+                effective_access_service = AccessService(
                     create_session_factory(database_engine),
                     redis_auth_state,
                     runtime_settings,
@@ -196,6 +206,7 @@ def create_app(
     application.state.user_management_service = effective_user_management_service
     application.state.provisioning_service = effective_provisioning_service
     application.state.server_discovery_service = effective_server_discovery_service
+    application.state.access_service = effective_access_service
     application.state.password_reset_delivery = password_reset_delivery
     install_auth_http_safeguards(application, runtime_settings)
     application.add_middleware(
@@ -210,6 +221,7 @@ def create_app(
     application.include_router(email_delivery_router)
     application.include_router(topology_admin_router)
     application.include_router(user_management_router)
+    application.include_router(access_router)
     application.include_router(devices_router)
     application.include_router(server_discovery_router)
 
