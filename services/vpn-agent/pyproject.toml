@@ -12,7 +12,7 @@ dependencies = [
   "anyio==4.14.2",
   "fastapi==0.141.1",
   "pydantic-settings==2.15.0",
-  "uvicorn[standard]==0.52.3",
+  "uvicorn[standard]==0.52.4",
 ]
 
 [project.scripts]
@@ -20,8 +20,8 @@ nebula-agent-serve = "nebula_agent.serve:main"
 
 [project.optional-dependencies]
 dev = [
-  "httpx2==2.10.0",
-  "mypy==2.3.0",
+  "httpx2==2.12.0",
+  "mypy==2.3.1",
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
