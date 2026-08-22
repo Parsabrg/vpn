@@ -12,12 +12,12 @@ dependencies = [
   "pydantic-settings==2.15.0",
   "psycopg[binary]==3.3.4",
   "redis==8.1.0",
-  "sqlalchemy[asyncio]==2.0.51",
+  "sqlalchemy[asyncio]==2.0.52",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "mypy==2.3.0",
+  "mypy==2.3.1",
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
