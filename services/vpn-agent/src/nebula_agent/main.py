@@ -22,6 +22,7 @@ from nebula_agent.drivers.wireguard import NativeWireGuardDriver
 from nebula_agent.drivers.xray_base import XrayDriver
 from nebula_agent.hysteria_auth import HysteriaAuthServer
 from nebula_agent.ledger import OperationLedger
+from nebula_agent.metrics import MetricsMiddleware
 from nebula_agent.settings import Settings, get_settings
 
 _LOGGER = logging.getLogger(__name__)
@@ -149,6 +150,7 @@ def create_app(
     async def _handle_driver_error(_request: Request, _error: DriverError) -> Response:
         return Response(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    application.add_middleware(MetricsMiddleware)
     application.include_router(operations_router)
     application.include_router(xray_operations_router)
     application.include_router(usage_router)

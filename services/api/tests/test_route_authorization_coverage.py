@@ -52,6 +52,8 @@ AUTHORIZATION_PRIMITIVES = frozenset({"principal", "validate_and_rotate_csrf"})
 PUBLIC_ROUTES = {
     ("/healthz", "GET"): "liveness probe; reports status and version only",
     ("/readyz", "GET"): "readiness probe; reports status and version only",
+    ("/metrics", "GET"): "Prometheus counters by route template; nginx answers it with 404 "
+    "from outside, so only the host's loopback reads it",
     ("/v1/pairing", "GET"): "read before any account exists, to check the pairing link; "
     "holds only the deployment's name, identity and CA, which the link already names -- "
     "server addresses and other routes stay behind sign-in",

@@ -42,6 +42,7 @@ from nebula_api.email_deliveries.service import EmailDeliveryService
 from nebula_api.enrollment.routes import admin_router as enrollment_admin_router
 from nebula_api.enrollment.routes import router as enrollment_router
 from nebula_api.enrollment.service import EnrollmentService
+from nebula_api.metrics import MetricsMiddleware, exposition
 from nebula_api.pairing import PairingService
 from nebula_api.pairing import router as pairing_router
 from nebula_api.provisioning.reconciliation import ReconciliationSummary, reconcile_now
@@ -307,6 +308,8 @@ def create_app(
         RequestBodyLimitMiddleware,
         max_bytes=runtime_settings.max_request_bytes,
     )
+    # Outermost, so a request refused by a middleware is counted too.
+    application.add_middleware(MetricsMiddleware)
     application.include_router(user_auth_router)
     application.include_router(admin_auth_router)
     application.include_router(account_request_router)
@@ -328,6 +331,11 @@ def create_app(
     @application.get("/healthz", response_model=ProbeResponse, tags=["probes"])
     async def health() -> ProbeResponse:
         return ProbeResponse(status="ok", service="nebula-api", version=__version__)
+
+    @application.get("/metrics", include_in_schema=False)
+    async def metrics() -> Response:
+        body, content_type = exposition()
+        return Response(content=body, media_type=content_type)
 
     @application.get(
         "/readyz",

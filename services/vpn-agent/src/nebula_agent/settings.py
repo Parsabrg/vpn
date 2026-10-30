@@ -236,6 +236,8 @@ class Settings(BaseSettings):
     # ones -- exactly what the threat model forbids.
     agent_bind_host: str = "0.0.0.0"  # noqa: S104 - dev-safe default, see comment above
     agent_bind_port: int = Field(default=9443, ge=1, le=65535)
+    # Prometheus metrics on 127.0.0.1 only; 0 turns them off.
+    agent_metrics_port: int = Field(default=9464, ge=0, le=65535)
 
     @field_validator("xray_dns_redirect")
     @classmethod

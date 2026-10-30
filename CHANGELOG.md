@@ -11,6 +11,8 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- Prometheus metrics for the API and the agent on the server's loopback, and a Grafana
+  dashboard (`docs/runbooks/metrics.md`).
 - Audit log export as a hash chain (panel: Audit log → Export); `nebula-api audit-verify`
   checks an export, and that a later one still contains an earlier one unchanged.
 - `NEBULA_ADMIN_ALLOW` limits the admin panel and admin API to listed addresses.
