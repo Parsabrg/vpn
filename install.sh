@@ -539,7 +539,12 @@ ok "Xray $(/usr/local/bin/xray version | awk 'NR==1{print $2}'), Hysteria2, Wire
 step "Firewall"
 # awk reads to the end: one that exits early SIGPIPEs sshd, and pipefail
 # then ends the whole install (seen 2026-10-26, exit 141).
-SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{p=$2} END{print p}'); SSH_PORT=${SSH_PORT:-22}
+# sshd -T can fail (exit 255 with no /run/sshd, e.g. socket-activated ssh);
+# then the Port lines of its config decide, so a custom port stays open.
+SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{p=$2} END{print p}' || true)
+[ -n "$SSH_PORT" ] || SSH_PORT=$(cat /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null \
+  | awk 'tolower($1)=="port"{p=$2} END{print p}' || true)
+SSH_PORT=${SSH_PORT:-22}
 ufw allow "$SSH_PORT/tcp" comment ssh >/dev/null
 for p in 80/tcp 8445/tcp 8447/tcp 8448/tcp 8449/tcp 8450/udp 51820/udp; do ufw allow $p comment nebula >/dev/null; done
 if [ -n "$JOIN_URL" ]; then

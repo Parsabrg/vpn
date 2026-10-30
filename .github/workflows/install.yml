@@ -92,3 +92,4 @@ jobs:
         run: |
           sudo journalctl -u nebula-vpn-agent -u nebula-xray --no-pager -n 60 || true
           sudo docker ps -a || true
+          sudo sshd -T >/dev/null || echo "sshd -T exit $?"
