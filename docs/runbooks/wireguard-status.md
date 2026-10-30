@@ -77,7 +77,8 @@ server and says the network may be blocking WireGuard.
 
 `install.sh` does this itself since 2026-10-30, for every new or rerun
 install: IPv4 forwarding in `/etc/sysctl.d/99-nebula-forward.conf`, the
-masquerade for `10.77.0.0/24` and the client restrictions (not each other,
+masquerade for the server's WireGuard range (`10.77.0.0/20` on a new install,
+kept as it is on an older one; see `docs/environment.md`) and the client restrictions (not each other,
 not this host, not private, Docker or metadata ranges) in ufw's
 `before.rules` under a `nebula-wireguard` marker, and
 `ufw route allow in on wg0 out on <outgoing interface>`. The steps below are
