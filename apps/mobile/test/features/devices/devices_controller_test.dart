@@ -4378,6 +4378,67 @@ void _accessTests() {
     expect(state.actionErrorMessage, isNull);
   });
 
+  test(
+    'a revoked credential takes the other saved ones of its server',
+    () async {
+      final FakeAccountRepository accounts = _accounts(
+        devices: <AccountDevice>[_thisDevice(serverCodes: <String>[])],
+      );
+      final harness = _harness(accessInterval: interval, accounts: accounts);
+      addTearDown(harness.container.dispose);
+      AvailableProfile profile(String code) => AvailableProfile(
+        code: code,
+        displayName: code,
+        protocolId: 'protocol-vless',
+        protocolCode: 'vless',
+        adBlock: false,
+      );
+      harness.repository.servers = <AvailableServer>[
+        AvailableServer(
+          code: 'ams-2',
+          displayName: 'Amsterdam 2',
+          publicHost: 'ams-2.example.test',
+          profiles: <AvailableProfile>[
+            profile('vless-xhttp-tls'),
+            profile('vless-ws-tls'),
+          ],
+        ),
+      ];
+      harness.repository.requestXrayClientResult = _xrayClientResult();
+      final XrayCredentialStore store = harness.container.read(
+        xrayCredentialStoreProvider,
+      );
+      // A stale one for the protocol not in use, as from an earlier install.
+      await store.write(
+        serverCode: 'ams-2',
+        profileCode: 'vless-ws-tls',
+        credential: _xrayClientResult(),
+      );
+      final DevicesController notifier = harness.container.read(
+        devicesControllerProvider.notifier,
+      );
+      await notifier.load();
+      notifier.selectServer('ams-2');
+      notifier.selectProfile('vless-xhttp-tls');
+      await notifier.connect(_deviceId);
+      harness.tunnel.vpnOwner = VpnOwner.own;
+
+      for (int waited = 0; waited < 200; waited++) {
+        if (harness.xrayTunnel.connectCalls >= 2) {
+          break;
+        }
+        await Future<void>.delayed(interval);
+      }
+      accounts.devices = <AccountDevice>[_thisDevice()];
+
+      expect(harness.xrayTunnel.connectCalls, greaterThanOrEqualTo(2));
+      expect(
+        await store.read(serverCode: 'ams-2', profileCode: 'vless-ws-tls'),
+        isNull,
+      );
+    },
+  );
+
   test('a device no longer on the account stops', () async {
     await expectEnded(
       _accounts(devices: <AccountDevice>[]),
