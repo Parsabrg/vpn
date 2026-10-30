@@ -472,7 +472,7 @@ if [ ! -f $CERT/fullchain.pem ]; then
   # a server block whose certificate file is missing.
   awk '/^server \{/{n++} n<=1' /etc/nginx/sites-available/nebula > /etc/nginx/sites-available/nebula-acme
   ln -sf /etc/nginx/sites-available/nebula-acme /etc/nginx/sites-enabled/nebula
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx
+  nginx -t >/dev/null 2>&1 && systemctl reload-or-restart nginx
   domains=(); for h in "${NAMES[@]}"; do domains+=(-d "$h"); done
   certbot certonly --webroot -w /var/www/nebula-acme --cert-name "$CERTNAME" "${domains[@]}" \
     --email "$NEBULA_ADMIN_EMAIL" --agree-tos --no-eff-email --non-interactive -q \
@@ -487,7 +487,7 @@ sed -e "s/vpn.example.com/$NEBULA_DOMAIN/g" -e "s#live/$NEBULA_DOMAIN/#live/$CER
   -e "s#location /xhttp {#location $XHTTP_PATH {#" -e "s#location /ws {#location $WS_PATH {#" -e "s#location /grpc/ {#location /$GRPC_NAME/ {#" \
   "$REPO/infrastructure/nginx/xray-8445.conf" > /etc/nginx/conf.d/xray-8445.conf
 nginx -t >/dev/null 2>&1 || { nginx -t; die "nginx rejected the configuration"; }
-systemctl reload nginx
+systemctl enable -q nginx; systemctl reload-or-restart nginx
 ok "certificate for ${NAMES[*]}"
 
 # --- VPN engines and agent ----------------------------------------------------
@@ -727,7 +727,7 @@ for p in "${OPEN_PORTS[@]}"; do
     ufw allow "$one" comment nebula >/dev/null
   done
 done
-[ -n "$CONFIGURE" ] && { nginx -t >/dev/null 2>&1 && systemctl reload nginx; ufw reload >/dev/null; }
+[ -n "$CONFIGURE" ] && { nginx -t >/dev/null 2>&1 && systemctl reload-or-restart nginx; ufw reload >/dev/null; }
 systemctl enable nebula-vpn-agent >/dev/null 2>&1; systemctl restart nebula-vpn-agent
 for _ in $(seq 1 30); do [ -f /etc/nebula/xray/config.json ] && break; sleep 1; done
 systemctl enable --now nebula-xray nebula-hysteria >/dev/null 2>&1
