@@ -140,11 +140,15 @@ class UserAuthService:
             account_bucket = str(user.id) if user is not None else normalized.key
             await self._require_rate_limit(
                 session,
-                buckets=(
-                    RateBucket("user-account", account_bucket),
-                    RateBucket("user-login-network", network_prefix),
-                ),
+                buckets=(RateBucket("user-account", account_bucket),),
                 limit=self._settings.user_login_rate_limit,
+                request_id=request_id,
+                now=now,
+            )
+            await self._require_rate_limit(
+                session,
+                buckets=(RateBucket("user-login-network", network_prefix),),
+                limit=self._settings.user_network_rate_limit,
                 request_id=request_id,
                 now=now,
             )
@@ -244,11 +248,12 @@ class UserAuthService:
         request_id: UUID,
     ) -> UserTokenPair:
         now = self._now()
+        # The token alone: it is 256 bits, so guessing is no concern, and a
+        # per-network bucket made every device behind one VPN server (whose
+        # API calls use the tunnel) share 10 refreshes per 15 minutes.
+        del network_prefix
         await self._require_rate_limit_without_session(
-            buckets=(
-                RateBucket("refresh-token", refresh_token),
-                RateBucket("user-refresh-network", network_prefix),
-            ),
+            buckets=(RateBucket("refresh-token", refresh_token),),
             limit=self._settings.user_login_rate_limit,
         )
         try:
@@ -430,11 +435,15 @@ class UserAuthService:
             account_bucket = str(user.id) if user is not None else normalized.key
             await self._require_rate_limit(
                 session,
-                buckets=(
-                    RateBucket("reset-account", account_bucket),
-                    RateBucket("reset-request-network", network_prefix),
-                ),
+                buckets=(RateBucket("reset-account", account_bucket),),
                 limit=self._settings.password_reset_rate_limit,
+                request_id=request_id,
+                now=now,
+            )
+            await self._require_rate_limit(
+                session,
+                buckets=(RateBucket("reset-request-network", network_prefix),),
+                limit=self._settings.user_network_rate_limit,
                 request_id=request_id,
                 now=now,
             )
@@ -510,11 +519,12 @@ class UserAuthService:
         request_id: UUID,
     ) -> None:
         await self._require_rate_limit_without_session(
-            buckets=(
-                RateBucket("reset-token", raw_token),
-                RateBucket("reset-confirm-network", network_prefix),
-            ),
+            buckets=(RateBucket("reset-token", raw_token),),
             limit=self._settings.password_reset_rate_limit,
+        )
+        await self._require_rate_limit_without_session(
+            buckets=(RateBucket("reset-confirm-network", network_prefix),),
+            limit=self._settings.user_network_rate_limit,
         )
         now = self._now()
         new_hash = await hash_password_async(new_password)

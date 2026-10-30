@@ -101,6 +101,7 @@ class AllowingRedis:
     def __init__(self) -> None:
         self.allowed = True
         self.buckets: list[tuple[RateBucket, ...]] = []
+        self.limits: list[int] = []
 
     async def rate_limit(
         self,
@@ -111,6 +112,7 @@ class AllowingRedis:
     ) -> bool:
         assert limit > 0 and window_seconds > 0
         self.buckets.append(buckets)
+        self.limits.append(limit)
         return self.allowed
 
 
@@ -610,10 +612,8 @@ def test_login_rate_limit_is_audited_and_device_quota_fails_closed() -> None:
             )
         )
     assert limited_database.commits == 1
-    assert [bucket.namespace for bucket in redis.buckets[0]] == [
-        "user-account",
-        "user-login-network",
-    ]
+    # Refused on the account bucket; the network one is never reached.
+    assert [[b.namespace for b in call] for call in redis.buckets] == [["user-account"]]
 
     quota_database = ScriptedSession(scalar_values=(user(), 3))
     quota, _ = service(ScriptedFactory(quota_database))
@@ -645,10 +645,9 @@ def test_refresh_unknown_digest_and_inactive_family_are_generic() -> None:
             )
         )
     assert missing_database.commits == 1
-    assert [bucket.namespace for bucket in missing_redis.buckets[0]] == [
-        "refresh-token",
-        "user-refresh-network",
-    ]
+    # The token alone: a network bucket made every device behind one VPN
+    # server share ten refreshes.
+    assert [[b.namespace for b in call] for call in missing_redis.buckets] == [["refresh-token"]]
 
     token = refresh_record()
     digest = __import__(
@@ -717,10 +716,13 @@ def test_reset_request_without_delivery_creates_no_token_or_email() -> None:
     assert result is None
     assert not any(isinstance(item, PasswordResetToken) for item in database.added)
     assert not any(isinstance(item, EmailDelivery) for item in database.added)
-    assert [bucket.namespace for bucket in redis.buckets[0]] == [
-        "reset-account",
-        "reset-request-network",
+    assert [[b.namespace for b in call] for call in redis.buckets] == [
+        ["reset-account"],
+        ["reset-request-network"],
     ]
+    # The network bucket has its own, higher limit (carrier NAT, VPN exits).
+    assert redis.limits[1] == Settings(env="test").user_network_rate_limit
+    assert redis.limits[1] > redis.limits[0]
 
 
 def test_password_reset_confirmation_is_rate_limited_before_hashing_or_database_work() -> None:
@@ -738,10 +740,7 @@ def test_password_reset_confirmation_is_rate_limited_before_hashing_or_database_
             )
         )
 
-    assert [bucket.namespace for bucket in redis.buckets[0]] == [
-        "reset-token",
-        "reset-confirm-network",
-    ]
+    assert [[b.namespace for b in call] for call in redis.buckets] == [["reset-token"]]
 
 
 def _login_remembered(database: ScriptedSession) -> None:
