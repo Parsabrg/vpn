@@ -18,12 +18,12 @@ should point its `API_BASE_URL` at `https://<host>:8445` instead of
 
 ## What is, and isn't, tracked here
 
-`xray-8445.conf` is the **only** nginx artifact this repo owns. The
-existing `:8444` block that fronts the admin panel and API on this host is
-explicitly **out of scope** and untouched: it was set up manually against
-the first VPS (`install.sh` now writes its own, `nebula-8444.conf`). Nothing in this directory modifies, replaces, or
-assumes edit access to that config -- it is additive, a second server block
-on a different port.
+This repository owns the nginx files `install.sh` installs: `nebula-8444.conf`
+(the panel and API on `:8444`), `xray-8445.conf` (the client-facing `:8445`),
+`nebula-ratelimit.conf` and `cloudflare-real-ip.conf`. The first VPS predates
+the installer and has a hand-made `:8444` block instead; on that host
+`xray-8445.conf` is added beside it as a second server block on a different
+port.
 
 ## Install: drop-in, not an edited vhost
 

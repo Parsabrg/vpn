@@ -4,8 +4,9 @@ How a Nebula client release is cut, as practised since 0.1.12, with a SHA-256
 manifest from the first release after 2026-10-01 (roadmap section 60).
 
 Releases are built on the maintainer's machine: the Android signing key lives
-there (see [release-signing-key.md](release-signing-key.md)), and the hosted
-CI has no budget.
+there (see [release-signing-key.md](release-signing-key.md)). CI runs on
+GitHub-hosted runners and checks every pull request, but does not sign or
+publish releases.
 
 **Public releases carry no addresses.** No `API_BASE_URL`, no
 `API_BACKUP_URL`, no `FREE_LINKS`: one generic app for every installation,
