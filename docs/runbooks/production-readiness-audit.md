@@ -60,7 +60,11 @@ Run on the VPS (`ssh nebula`) when ready.
 the operator's alone. Nothing in this section, and nothing in a future
 audit, should change them without being asked for by name each time.
 
-**H-1 — SSH hardening: done 2026-09-17**, see the row above. To undo any
+**H-1 — SSH hardening: done 2026-09-17**, see the row above. Since 2026-10-30
+`install.sh` installs and enables fail2ban (its default sshd jail) and daily
+unattended security upgrades on every server it sets up, and adds a 2 GB
+swapfile to a server with no swap and under 4 GB of memory (M-5). SSH password
+login is left as it is: turning it off is the operator's call. To undo any
 part of it:
 ```bash
 sudo passwd -u reza                                   # unlock the account
