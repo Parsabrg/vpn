@@ -76,8 +76,10 @@ updates:
       - dependency-name: "tray_manager"
         versions: [">=0.7.0"]
 
-  - package-ecosystem: docker
-    directory: /
+  # The images the Compose files pull (Postgres, Redis, AdGuard, nginx):
+  # the root has no Dockerfile, so the plain docker updater found nothing.
+  - package-ecosystem: docker-compose
+    directories: ["/", "/infrastructure/compose"]
     schedule:
       interval: weekly
 

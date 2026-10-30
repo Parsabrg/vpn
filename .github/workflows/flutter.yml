@@ -60,6 +60,10 @@ jobs:
       # a copy of the plugin taken from the pub cache, and the cache is empty
       # until something puts it there. `pub get` cannot, because of the
       # override, so `pub cache add` does it directly.
+      # hev-socks5-tunnel is built for Android with ndk-build; the image has
+      # the SDK but no NDK. The release builds' NDK (Flutter's default).
+      - name: Install the Android NDK
+        run: yes | sdkmanager --install "ndk;28.2.13676358" > /dev/null
       - name: Vendor the patched flutter_v2ray_client
         working-directory: apps/mobile
         run: |
