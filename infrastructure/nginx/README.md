@@ -67,7 +67,10 @@ removed or narrowed, add `include /etc/nginx/conf.d/*.conf;` inside the
 2. **Loopback port match.** The `proxy_pass` target
    (`http://127.0.0.1:8446`) and the `location /xhttp` path must match
    `Settings.xray_local_listen_port` and `Settings.xray_xhttp_path` in the
-   deployed agent's environment exactly (defaults `8446` and `/xhttp`).
+   deployed agent's environment exactly (defaults `8446` and `/xhttp`). `install.sh` gives a new
+   install its own XHTTP and WebSocket paths and gRPC service name, written to both `agent.env`
+   (`NEBULA_XRAY_XHTTP_PATH`, `NEBULA_XRAY_WS_PATH`, `NEBULA_XRAY_GRPC_SERVICE_NAME`) and this file,
+   so installs do not share a fingerprint; installs from before 2026-10-30 keep the defaults.
    Nothing enforces this automatically -- if an operator overrides either
    setting, this file needs a matching edit.
 
@@ -207,7 +210,7 @@ Four things, all scoped to the one hostname:
    would send plain HTTP at a TLS-only port; this overrides it for this name
    alone, and Strict is available because the certificate now covers it.
 4. **A second Origin Rule, placed after the first**:
-   `(http.host eq "cdn.example.org" and ssl and starts_with(http.request.uri.path, "/grpc/"))`
+   `(http.host eq "cdn.example.org" and ssl and starts_with(http.request.uri.path, "/<service>/"))` -- `<service>` is the install's `NEBULA_XRAY_GRPC_SERVICE_NAME` (`grpc` on installs from before 2026-10-30)
    -> rewrite destination port to `8447`, the gRPC inbound's own port. Last
    matching rule wins, so this overrides the first for gRPC paths only. The
    inbound's certificate must cover the CDN name, which the certbot line

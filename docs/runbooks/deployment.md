@@ -139,8 +139,8 @@ not guaranteed.
 ### 6. Verify
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' https://api.example.org:8444/healthz   # 200
-curl -s -o /dev/null -w '%{http_code}\n' https://api.example.org:8444/readyz    # 200
+docker exec nebula-production-api-1 python -c "import urllib.request as u; print(u.urlopen('http://127.0.0.1:8000/readyz').status)"   # 200
+curl -s -o /dev/null -w '%{http_code}\n' https://api.example.org:8444/readyz    # 404 from outside, on purpose
 curl -s -o /dev/null -w '%{http_code}\n' https://api.example.org:8444/v1/servers/  # 401
 curl -s -o /dev/null -w '%{http_code}\n' https://panel.example.org/             # 200
 ```
