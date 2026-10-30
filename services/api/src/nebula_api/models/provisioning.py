@@ -85,6 +85,7 @@ class DeviceProtocolCredential(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "uq_device_protocol_credentials_live_device_profile",
             "device_id",
             "protocol_profile_id",
+            "vpn_server_id",
             unique=True,
             postgresql_where=text("state IN ('requested', 'applying', 'active', 'revoking')"),
         ),
@@ -206,6 +207,7 @@ class WireGuardPeer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         # satisfy short of discarding its identity.
         Index(
             "uq_wireguard_peers_public_key_live",
+            "vpn_server_id",
             "public_key",
             unique=True,
             postgresql_where=text("state IN ('requested', 'applying', 'active', 'revoking')"),
@@ -220,6 +222,7 @@ class WireGuardPeer(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(
             "uq_wireguard_peers_live_device",
             "device_id",
+            "vpn_server_id",
             unique=True,
             postgresql_where=text("state IN ('requested', 'applying', 'active', 'revoking')"),
         ),
@@ -310,6 +313,7 @@ class XrayClient(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "uq_xray_clients_live_device_profile",
             "device_id",
             "protocol_profile_id",
+            "vpn_server_id",
             unique=True,
             postgresql_where=text("state IN ('requested', 'applying', 'active', 'revoking')"),
         ),
