@@ -1748,12 +1748,23 @@ class DevicesController extends Notifier<DevicesState> {
       return false;
     }
     _lastCredentialRetry = now;
-    try {
-      await ref
-          .read(xrayCredentialStoreProvider)
-          .forget(serverCode: server, profileCode: profile);
-    } catch (_) {
-      // Asked afresh all the same.
+    // Every saved credential for the server, not only the one in use: the
+    // others came from the same place, and Automatic picked the next stale
+    // one -- saved while the server ran as its own installation -- and
+    // ended the same way a minute later (2026-10-30).
+    final XrayCredentialStore store = ref.read(xrayCredentialStoreProvider);
+    final AvailableServer? listed = state.servers
+        .where((AvailableServer s) => s.code == server)
+        .firstOrNull;
+    for (final String code in <String>{
+      profile,
+      ...?listed?.profiles.map((AvailableProfile p) => p.code),
+    }) {
+      try {
+        await store.forget(serverCode: server, profileCode: code);
+      } catch (_) {
+        // Asked afresh all the same.
+      }
     }
     await _endTunnel(reason: null, revokeOnServer: false);
     if (ref.mounted) {
