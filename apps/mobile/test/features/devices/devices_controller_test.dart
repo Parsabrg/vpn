@@ -4347,6 +4347,37 @@ void _accessTests() {
     );
   });
 
+  test('a revoked credential on a server still offered is replaced', () async {
+    // A saved copy of a credential the server had revoked raised a working
+    // tunnel, and "access ended" followed (phone, 2026-10-30): the account
+    // still had the server. Asked afresh, the server lists it again.
+    final FakeAccountRepository accounts = _accounts(
+      devices: <AccountDevice>[_thisDevice(serverCodes: <String>[])],
+    );
+    final harness = _harness(accessInterval: interval, accounts: accounts);
+    addTearDown(harness.container.dispose);
+    await connectXray(harness.container, harness.repository);
+    harness.tunnel.vpnOwner = VpnOwner.own;
+    final int asked = harness.repository.requestXrayClientCalls;
+
+    for (int waited = 0; waited < 200; waited++) {
+      if (harness.xrayTunnel.connectCalls >= 2) {
+        break;
+      }
+      await Future<void>.delayed(interval);
+    }
+    accounts.devices = <AccountDevice>[_thisDevice()];
+    await Future<void>.delayed(interval * 20);
+
+    final DevicesState state = harness.container.read(
+      devicesControllerProvider,
+    );
+    expect(harness.xrayTunnel.connectCalls, greaterThanOrEqualTo(2));
+    expect(harness.repository.requestXrayClientCalls, greaterThan(asked));
+    expect(state.tunnelEstablished, isTrue);
+    expect(state.actionErrorMessage, isNull);
+  });
+
   test('a device no longer on the account stops', () async {
     await expectEnded(
       _accounts(devices: <AccountDevice>[]),
