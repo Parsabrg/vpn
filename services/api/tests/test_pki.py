@@ -9,6 +9,7 @@ reads as correct in every text dump of it.
 import ipaddress
 import os
 from pathlib import Path
+from typing import Literal
 
 import pytest
 from cryptography import x509
@@ -154,19 +155,27 @@ class TestSigning:
         assert names.get_values_for_type(x509.IPAddress) == [ipaddress.ip_address("5.6.7.8")]
         assert names.get_values_for_type(x509.DNSName) == []
 
-    def test_a_certificate_serves_both_ends_of_the_agent_link(self, tmp_path: Path) -> None:
+    def test_a_node_certificate_is_for_one_end_only(self, tmp_path: Path) -> None:
         authority = _authority(tmp_path)
         csr, _ = create_certificate_request(common_name="node-02")
 
-        certificate = x509.load_pem_x509_certificate(
+        server = x509.load_pem_x509_certificate(
             sign_node_certificate(
                 authority, csr, common_name="node-02", hostnames=["vps2.example.com"]
             )
         )
+        client = x509.load_pem_x509_certificate(
+            sign_node_certificate(
+                authority, csr, common_name="control", hostnames=["control"], usage="client"
+            )
+        )
 
-        usage = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
-        assert ExtendedKeyUsageOID.SERVER_AUTH in usage
-        assert ExtendedKeyUsageOID.CLIENT_AUTH in usage
+        assert list(server.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value) == [
+            ExtendedKeyUsageOID.SERVER_AUTH
+        ]
+        assert list(client.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value) == [
+            ExtendedKeyUsageOID.CLIENT_AUTH
+        ]
 
     def test_a_signed_node_certificate_cannot_sign_others(self, tmp_path: Path) -> None:
         authority = _authority(tmp_path)
@@ -283,3 +292,77 @@ def test_a_generated_request_carries_an_ec_key() -> None:
     assert isinstance(request.public_key(), ec.EllipticCurvePublicKey)
     assert isinstance(key, ec.EllipticCurvePrivateKey)
     assert request.is_signature_valid
+
+
+def _handshake(
+    tmp_path: Path, authority: CertificateAuthority, client_usage: Literal["server", "client"]
+) -> bool:
+    """A TLS handshake the way the agent runs it (serve.py: CERT_REQUIRED
+    against the node CA), with the caller presenting a certificate of
+    [client_usage]. True when the agent accepts it."""
+
+    import socket
+    import ssl
+    import threading
+
+    def issue(name: str, usage: Literal["server", "client"]) -> tuple[Path, Path]:
+        csr, key = create_certificate_request(common_name=name)
+        cert = sign_node_certificate(
+            authority, csr, common_name=name, hostnames=["127.0.0.1"], usage=usage
+        )
+        write_certificate(tmp_path / f"{name}.crt", cert)
+        write_private_key(tmp_path / f"{name}.key", key)
+        return tmp_path / f"{name}.crt", tmp_path / f"{name}.key"
+
+    write_certificate(tmp_path / "ca.crt", authority.certificate_pem())
+    agent_cert, agent_key = issue("agent", "server")
+    caller_cert, caller_key = issue("caller", client_usage)
+
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(agent_cert, agent_key)
+    server_context.load_verify_locations(tmp_path / "ca.crt")
+    server_context.verify_mode = ssl.CERT_REQUIRED
+    client_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    client_context.load_verify_locations(tmp_path / "ca.crt")
+    client_context.load_cert_chain(caller_cert, caller_key)
+
+    listener = socket.create_server(("127.0.0.1", 0))
+    port = listener.getsockname()[1]
+    accepted: list[bool] = []
+
+    def serve() -> None:
+        connection, _ = listener.accept()
+        try:
+            with server_context.wrap_socket(connection, server_side=True) as tls:
+                tls.recv(1)
+                tls.sendall(b"y")
+                accepted.append(True)
+        except (ssl.SSLError, OSError):
+            accepted.append(False)
+
+    thread = threading.Thread(target=serve)
+    thread.start()
+    try:
+        with (
+            socket.create_connection(("127.0.0.1", port)) as raw,
+            client_context.wrap_socket(raw, server_hostname="127.0.0.1") as tls,
+        ):
+            tls.sendall(b"x")
+            tls.recv(1)
+    except (ssl.SSLError, OSError):
+        pass
+    thread.join(timeout=10)
+    listener.close()
+    return accepted == [True]
+
+
+def test_the_agent_refuses_a_server_certificate_as_its_caller(tmp_path: Path) -> None:
+    # A taken-over server's own certificate must not let it act as the
+    # control plane toward the others.
+    authority = _authority(tmp_path)
+    assert not _handshake(tmp_path, authority, "server")
+
+
+def test_the_agent_accepts_the_control_planes_client_certificate(tmp_path: Path) -> None:
+    authority = _authority(tmp_path)
+    assert _handshake(tmp_path, authority, "client")

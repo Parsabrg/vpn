@@ -34,6 +34,7 @@ import ipaddress
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -149,8 +150,14 @@ def sign_node_certificate(
     *,
     common_name: str,
     hostnames: list[str],
+    usage: Literal["server", "client"] = "server",
 ) -> bytes:
     """Sign a node's request, returning the certificate PEM.
+
+    [usage] is the one end of the agent link the certificate may act as: an
+    agent's is a server certificate, the control plane's a client one. A
+    certificate good for both let any server, if taken over, call every
+    other server's agent as the control plane.
 
     The subject is rebuilt here rather than taken from the request. A CSR's
     subject and its SAN list are whatever the requester wrote, and a node that
@@ -195,13 +202,11 @@ def sign_node_certificate(
         .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
         .add_extension(x509.SubjectAlternativeName(alternative_names), critical=False)
         .add_extension(
-            # Both, because one certificate serves both directions of this
-            # link: the agent presents it as a server, and the control plane's
-            # own certificate is issued by this same function as a client.
             x509.ExtendedKeyUsage(
                 [
-                    ExtendedKeyUsageOID.SERVER_AUTH,
-                    ExtendedKeyUsageOID.CLIENT_AUTH,
+                    ExtendedKeyUsageOID.SERVER_AUTH
+                    if usage == "server"
+                    else ExtendedKeyUsageOID.CLIENT_AUTH
                 ]
             ),
             critical=False,

@@ -216,6 +216,7 @@ def ensure_control_plane_identity(
         csr_pem,
         common_name=CONTROL_PLANE_COMMON_NAME,
         hostnames=[CONTROL_PLANE_COMMON_NAME],
+        usage="client",
     )
     write_private_key(key_path, key_pem)
     write_certificate(certificate_path, certificate_pem)
