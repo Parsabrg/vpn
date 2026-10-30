@@ -18,7 +18,8 @@ bootstrap:
 	npm --prefix apps/admin ci
 	cd apps/mobile && flutter pub get
 
-# Keeps the pins already in each lock; add --upgrade to move indirect ones.
+# Keeps the pins already in each lock. To move indirect ones (security
+# fixes), run the same command with --refresh --upgrade.
 locks:
 	for s in api vpn-agent worker; do (cd services/$$s && uv pip compile -q pyproject.toml --group build --universal --generate-hashes --python-version 3.12 --custom-compile-command "make locks" -o requirements.lock) || exit 1; done
 
