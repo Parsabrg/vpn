@@ -1,11 +1,12 @@
 """Read-only administrator audit log routes."""
 
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response, status
 
+from nebula_api.audit.chain import chain_lines
 from nebula_api.audit.schemas import AuditLogListItem, AuditLogListResponse
 from nebula_api.audit.service import AuditLogEntry, AuditLogFilters, AuditLogService
 from nebula_api.auth.admin_authorization import require_admin_session
@@ -61,6 +62,31 @@ async def list_audit_log(
         limit=limit,
         offset=offset,
     )
+
+
+# An event's recorded_at is its transaction's start, so one still committing
+# can land before events already exported; a margin keeps exports stable.
+_EXPORT_SETTLE = timedelta(minutes=5)
+
+
+@router.get("/export")
+async def export_audit_log(request: Request) -> Response:
+    """The whole log as a hash chain (JSON lines); `nebula-api audit-verify` checks it."""
+
+    await require_admin_session(request)
+    until = datetime.now(UTC) - _EXPORT_SETTLE
+    entries = await _service(request).export_events(until=until)
+    response = Response(
+        content="".join(chain_lines(entries, until=until)),
+        media_type="application/x-ndjson",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="nebula-audit-{until:%Y%m%dT%H%M%SZ}.jsonl"'
+            )
+        },
+    )
+    apply_auth_response_headers(response)
+    return response
 
 
 def _to_item(entry: AuditLogEntry) -> AuditLogListItem:

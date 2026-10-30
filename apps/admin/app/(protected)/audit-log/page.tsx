@@ -139,6 +139,17 @@ export default async function AuditLogPage({
       <section className="page-heading" aria-labelledby="audit-log-title">
         <h1 id="audit-log-title">Audit log</h1>
         <p>Append-only record of administrator and system actions.</p>
+        <p>
+          <a
+            className="button button--secondary"
+            href="/api/admin/audit-log/export"
+            download
+          >
+            Export as a hash chain
+          </a>{" "}
+          Keep exports off this server; <code>nebula-api audit-verify</code>{" "}
+          shows whether a later one still contains an earlier one unchanged.
+        </p>
       </section>
 
       <FilterBar fields={FILTER_FIELDS} values={filterValues} />
