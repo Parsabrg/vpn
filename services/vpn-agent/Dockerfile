@@ -22,7 +22,9 @@ RUN addgroup -S -g 10002 nebula-agent \
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN python -m pip install --no-cache-dir .
+# pip is not needed at runtime, and the copy in the base image carries its
+# own old certifi, urllib3, msgpack and setuptools that scanners flag.
+RUN python -m pip install --no-cache-dir .     && python -m pip uninstall --yes pip setuptools wheel
 
 USER 10002:10002
 EXPOSE 9443

@@ -1711,6 +1711,9 @@ class DevicesController extends Notifier<DevicesState> {
       } else if (account.hasExpiredAt(DateTime.now())) {
         reason = text.accessExpired;
       } else if (!_holdsAccess(devices)) {
+        if (await _retryRevokedCredential()) {
+          return;
+        }
         reason = text.errorAccessEnded;
       } else {
         reason = null;
@@ -1721,6 +1724,42 @@ class DevicesController extends Notifier<DevicesState> {
     } finally {
       _checkingAccess = false;
     }
+  }
+
+  DateTime? _lastCredentialRetry;
+
+  /// The server no longer lists this device's credential, but still offers
+  /// the server: the credential was revoked, not the access. A saved copy
+  /// the server had pruned raised a working tunnel, and "Your access to this
+  /// server has ended" followed seconds later (phone, 2026-10-30). Forgets
+  /// it and connects afresh, once in ten minutes; access that has really
+  /// ended is refused by that connect, or ends at the next check.
+  Future<bool> _retryRevokedCredential() async {
+    final String? server = state.connectedServerCode;
+    final String? profile = state.activeProfileCode;
+    final String? deviceId = _connectedDeviceId ?? _storedDeviceId();
+    final DateTime now = DateTime.now();
+    final DateTime? last = _lastCredentialRetry;
+    if (server == null ||
+        profile == null ||
+        deviceId == null ||
+        !state.servers.any((AvailableServer s) => s.code == server) ||
+        (last != null && now.difference(last) < const Duration(minutes: 10))) {
+      return false;
+    }
+    _lastCredentialRetry = now;
+    try {
+      await ref
+          .read(xrayCredentialStoreProvider)
+          .forget(serverCode: server, profileCode: profile);
+    } catch (_) {
+      // Asked afresh all the same.
+    }
+    await _endTunnel(reason: null, revokeOnServer: false);
+    if (ref.mounted) {
+      await connect(deviceId);
+    }
+    return true;
   }
 
   /// Whether this device still holds a live credential on the server it is

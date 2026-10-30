@@ -24,7 +24,9 @@ COPY pyproject.toml README.md ./
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
-RUN python -m pip install --no-cache-dir .
+# pip is not needed at runtime, and the copy in the base image carries its
+# own old certifi, urllib3, msgpack and setuptools that scanners flag.
+RUN python -m pip install --no-cache-dir .     && python -m pip uninstall --yes pip setuptools wheel
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
