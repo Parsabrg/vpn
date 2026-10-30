@@ -4,7 +4,7 @@ Nebula VPN is licensed under the GNU General Public License, version 3 or any
 later version (`GPL-3.0-or-later`, see [LICENSE](LICENSE)). It ships, or
 builds against, the software below. Each keeps its own license; every one is
 compatible with distributing Nebula under the GPL. This file is the license
-audit for the public-release checklist (docs/ROADMAP.md, section 101).
+audit for the public-release checklist (docs/roadmap-sections.md, section 101).
 Re-check it when a dependency or a bundled binary changes.
 
 Audited 2026-10-17 against `apps/mobile/pubspec.lock`, the three services'

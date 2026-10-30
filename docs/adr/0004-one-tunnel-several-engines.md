@@ -1,6 +1,10 @@
 # ADR 0004: One tunnel, several engines -- Xray and DNS tunnelling side by side
 
-- Status: proposed
+- Status: accepted in part (2026-10-30). Built: Xray as the engine for the TCP
+  transports, Hysteria2 on its own reference binary (D4, D5), hev-socks5-tunnel
+  as the TUN bridge, and "connected" checked by real traffic (D6). The DNS
+  tunnel engine was built and then removed (archive #301, 2026-10-08); bringing
+  it back as a last-resort route is a separate plan (ROADMAP.md, Next).
 - Date: 2026-09-03
 
 ## Context
