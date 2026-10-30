@@ -13,6 +13,7 @@ import ssl
 import uvicorn
 
 from nebula_agent.main import create_app
+from nebula_agent.metrics import serve_metrics
 from nebula_agent.settings import Settings, get_settings
 
 
@@ -34,7 +35,9 @@ def build_uvicorn_config(settings: Settings) -> uvicorn.Config:
 
 
 def main() -> None:
-    uvicorn.Server(build_uvicorn_config(get_settings())).run()
+    settings = get_settings()
+    serve_metrics(settings.agent_metrics_port)
+    uvicorn.Server(build_uvicorn_config(settings)).run()
 
 
 if __name__ == "__main__":

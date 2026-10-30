@@ -78,3 +78,18 @@ def test_phase_1_3_registers_probes_and_separate_auth_realms() -> None:
         )
 
     assert user.status_code == admin.status_code == 503
+
+
+def test_metrics_count_requests_by_route_template() -> None:
+    with TestClient(create_app(Settings(env="test"), readiness_check=ready_database)) as client:
+        client.get("/healthz")
+        client.get("/no/such/path/12345")
+        response = client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    body = response.text
+    assert 'nebula_api_requests_total{method="GET",route="/healthz",status="200"}' in body
+    assert 'route="unmatched",status="404"' in body
+    assert "12345" not in body
+    assert "nebula_api_request_seconds_bucket" in body
