@@ -66,6 +66,9 @@ jobs:
           sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 7 \
             -subj "/CN=panel.$d" -addext "subjectAltName=DNS:$d,DNS:panel.$d,DNS:api.$d" \
             -keyout "$a/privkey1.pem" -out "$a/fullchain1.pem"
+          # Trusted here as Let's Encrypt's would be: the agent enrols over it.
+          sudo cp "$a/fullchain1.pem" /usr/local/share/ca-certificates/nebula-ci.crt
+          sudo update-ca-certificates >/dev/null
           sudo ln -s "../../archive/panel.$d/privkey1.pem" "$l/privkey.pem"
           sudo ln -s "../../archive/panel.$d/fullchain1.pem" "$l/fullchain.pem"
       - name: New install
