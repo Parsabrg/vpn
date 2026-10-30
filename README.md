@@ -124,6 +124,12 @@ changed, and reruns from it; `--update v0.1.34` picks a release.
   changes their ports; the firewall, nginx, WireGuard and the server's offer
   to apps follow. Nebula writes Xray's configuration itself, so editing it by
   hand is overwritten.
+- **Admin panel from known addresses only:**
+  `sudo NEBULA_ADMIN_ALLOW=203.0.113.7,198.51.100.0/24 ./install.sh` lets only
+  those addresses open the panel and the admin API; everyone else gets 403.
+  The app's API is not affected. `NEBULA_ADMIN_ALLOW=any` opens it again.
+  Over the VPN is not an option: VPN clients are kept away from the server
+  itself.
 - **More servers:** the panel's Server health → **Add server** gives a
   one-line `install.sh --join` command for the new machine.
 - **Apps:** in the app, "Connect to your server" takes the address the
