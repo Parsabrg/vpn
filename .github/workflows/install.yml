@@ -1,0 +1,94 @@
+name: Install
+
+# install.sh on a fresh Ubuntu machine: a new install, then a rerun that must
+# leave the configuration and every secret as they were. GitHub's runner is a
+# whole VM (systemd, root, Docker); the certificate is self-signed and the
+# names point here through /etc/hosts, so nothing outside is needed. --join
+# needs a second machine and is not run here.
+on:
+  pull_request:
+    paths:
+      - "install.sh"
+      - "infrastructure/**"
+      - "services/vpn-agent/**"
+      - "**/*.sh"
+      - ".github/workflows/install.yml"
+  push:
+    branches: [main]
+    paths:
+      - "install.sh"
+      - "infrastructure/**"
+      - "services/vpn-agent/**"
+      - "**/*.sh"
+      - ".github/workflows/install.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NEBULA_DOMAIN: nebula-ci.test
+  NEBULA_ADMIN_EMAIL: ci@nebula-ci.test
+  NEBULA_EMAIL_MODE: skip
+  NEBULA_BACKUP_OFFSITE: local
+  NEBULA_ASSUME_YES: "1"
+
+jobs:
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - run: git ls-files -z '*.sh' | xargs -0 shellcheck -S warning
+
+  fresh-and-rerun:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Names and a self-signed certificate in place of DNS and certbot
+        run: |
+          set -eu
+          ip=$(curl -4 -fsS -m 10 https://www.cloudflare.com/cdn-cgi/trace | sed -n 's/^ip=//p')
+          d=$NEBULA_DOMAIN
+          echo "$ip $d panel.$d api.$d" | sudo tee -a /etc/hosts
+          a=/etc/letsencrypt/archive/panel.$d l=/etc/letsencrypt/live/panel.$d
+          sudo mkdir -p "$a" "$l"
+          sudo openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 7 \
+            -subj "/CN=panel.$d" -addext "subjectAltName=DNS:$d,DNS:panel.$d,DNS:api.$d" \
+            -keyout "$a/privkey1.pem" -out "$a/fullchain1.pem"
+          sudo ln -s "../../archive/panel.$d/privkey1.pem" "$l/privkey.pem"
+          sudo ln -s "../../archive/panel.$d/fullchain1.pem" "$l/fullchain.pem"
+      - name: New install
+        run: sudo -E ./install.sh </dev/null
+      - name: Snapshot
+        run: |
+          sudo sh -c 'sha256sum /etc/nebula/*.env /etc/nebula/secrets/* /etc/wireguard/wg0.conf \
+            /etc/ufw/before.rules /etc/nginx/sites-available/nebula' > /tmp/before.txt
+          wc -l < /tmp/before.txt
+      - name: Rerun
+        run: sudo -E ./install.sh </dev/null
+      - name: The rerun changed nothing
+        run: |
+          sudo sh -c 'sha256sum /etc/nebula/*.env /etc/nebula/secrets/* /etc/wireguard/wg0.conf \
+            /etc/ufw/before.rules /etc/nginx/sites-available/nebula' > /tmp/after.txt
+          diff /tmp/before.txt /tmp/after.txt
+      - name: Services are up
+        run: |
+          set -eu
+          systemctl is-active nebula-vpn-agent nebula-xray nebula-hysteria wg-quick@wg0 nginx
+          # Through nginx to the API, which asks for a session.
+          code=$(curl -sS --cacert /etc/letsencrypt/live/panel.$NEBULA_DOMAIN/fullchain.pem -o /dev/null -w '%{http_code}' \
+            --resolve api.$NEBULA_DOMAIN:8444:127.0.0.1 https://api.$NEBULA_DOMAIN:8444/v1/routes/)
+          echo "API answered $code"; [ "$code" = 401 ]
+      - name: Logs on failure
+        if: failure()
+        run: |
+          sudo journalctl -u nebula-vpn-agent -u nebula-xray --no-pager -n 60 || true
+          sudo docker ps -a || true

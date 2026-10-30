@@ -121,6 +121,10 @@ transaction.
 - Database: empty-database upgrade, schema-head verification, downgrade/upgrade
   smoke coverage where safe, and PostgreSQL constraint checks.
 - Infrastructure: Compose model validation plus a build-and-health smoke test.
+- Installer: `install.sh` runs on a fresh Ubuntu 24.04 runner (self-signed
+  certificate, names in `/etc/hosts`), then again, and the rerun must leave the
+  configuration and every secret unchanged (`.github/workflows/install.yml`);
+  every shell script passes `shellcheck -S warning`. `--join` is not covered.
 - Supply chain: dependency review, Dependabot, Gitleaks, and Trivy image scans.
 - Code scanning: CodeQL (GitHub's default setup, configured in the repository's
   settings rather than a workflow file) for Python, TypeScript and the workflows.
