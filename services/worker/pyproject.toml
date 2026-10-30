@@ -13,7 +13,7 @@ dependencies = [
   "pydantic-settings==2.16.1",
   "psycopg[binary]==3.3.6",
   "redis==8.1.0",
-  "sqlalchemy[asyncio]==2.1.5",
+  "sqlalchemy[asyncio]==2.1.6",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +22,7 @@ dev = [
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.17.1",
+  "ruff==0.17.3",
 ]
 
 [tool.hatch.build.targets.wheel]
