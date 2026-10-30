@@ -1,4 +1,4 @@
-FROM python:3.14.8-alpine3.24 AS runtime
+FROM python:3.14.9-alpine3.24 AS runtime
 
 # Alpine security updates on top of whatever the base image was last built
 # with. The CVE scan runs with --ignore-unfixed, so it fails only on
