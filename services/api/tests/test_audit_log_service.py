@@ -116,3 +116,13 @@ def test_list_events_defaults_missing_total_to_zero() -> None:
     page = asyncio.run(service.list_events(filters=AuditLogFilters(), limit=50, offset=0))
 
     assert page.total == 0
+
+
+def test_export_events_returns_every_row_oldest_first() -> None:
+    rows = [audit_row(), audit_row()]
+    session = ScriptedSession(scalars_values=[rows])
+    service = AuditLogService(cast(SessionFactory, ScriptedFactory(session)))
+
+    entries = asyncio.run(service.export_events(until=NOW))
+
+    assert [e.id for e in entries] == [r.id for r in rows]

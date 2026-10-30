@@ -39,6 +39,10 @@ class FakeAuditLogService:
         self.received_filters = filters
         return self.page
 
+    async def export_events(self, *, until: datetime) -> list[AuditLogEntry]:
+        self.export_until = until
+        return list(self.page.items)
+
 
 def make_client(
     audit_service: FakeAuditLogService | None = None,
@@ -116,3 +120,39 @@ def test_list_audit_log_service_unavailable() -> None:
         response = client.get("/v1/admin/audit-log/")
 
     assert response.status_code == 503
+
+
+def test_export_audit_log_requires_session() -> None:
+    with make_client() as client:
+        response = client.get("/v1/admin/audit-log/export")
+
+    assert response.status_code == 401
+
+
+def test_export_audit_log_is_a_verifiable_chain_up_to_a_settled_time() -> None:
+    from nebula_api.audit.chain import verify
+
+    service = FakeAuditLogService()
+    entry = AuditLogEntry(
+        id=uuid4(),
+        actor_kind="admin",
+        actor_id=ADMIN_ID,
+        target_kind="user",
+        target_id=uuid4(),
+        event_code="identity_state_changed",
+        outcome="succeeded",
+        reason_code="disabled",
+        request_id=None,
+        recorded_at=NOW,
+    )
+    service.page = AuditLogPage(items=[entry], total=1)
+    with make_client(audit_service=service) as client:
+        client.cookies.set(Settings(env="test").admin_cookie_name, "v1.session-canary")
+        response = client.get("/v1/admin/audit-log/export")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/x-ndjson")
+    assert "attachment" in response.headers["content-disposition"]
+    assert response.headers["cache-control"] == "no-store"
+    assert verify(response.text.splitlines()).count == 1
+    assert service.export_until < datetime.now(UTC)

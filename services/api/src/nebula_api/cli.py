@@ -29,6 +29,7 @@ from nebula_api.accounts.service import (
     ActivationNotReissued,
 )
 from nebula_api.agent_client.client import AgentClient, AgentClientBuilder
+from nebula_api.audit.chain import verify, verify_extends
 from nebula_api.auth.key_material import AuthKeyMaterial, load_auth_key_material
 from nebula_api.auth.redis_state import RedisAuthState, RedisClient
 from nebula_api.bootstrap import (
@@ -362,7 +363,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate_symmetric_key.add_argument("--out", required=True, type=Path)
 
+    audit_verify = commands.add_parser(
+        "audit-verify",
+        help="check an audit log export's hash chain, and that it extends an older export",
+    )
+    audit_verify.add_argument("export", type=Path)
+    audit_verify.add_argument(
+        "--extends", type=Path, help="an older export the new one must contain unchanged"
+    )
+
     return parser
+
+
+def run_audit_verify(export: Path, extends: Path | None) -> int:
+    """Print what an export proves; a broken chain raises AuditChainError."""
+
+    def lines(path: Path) -> list[str]:
+        try:
+            return path.read_text(encoding="utf-8").splitlines()
+        except OSError as error:
+            raise ValueError(f"cannot read {path}: {error.strerror or error}") from None
+
+    if extends is None:
+        summary = verify(lines(export))
+        print(f"intact: {summary.count} events up to {summary.until}, head {summary.head}")
+    else:
+        summary = verify_extends(lines(extends), lines(export))
+        print(
+            f"intact, and contains {extends} unchanged: {summary.count} events, head {summary.head}"
+        )
+    return 0
 
 
 def read_password() -> str:
@@ -1445,6 +1475,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return asyncio.run(
                 run_generate_symmetric_key(purpose=arguments.purpose, out=arguments.out)
             )
+        if arguments.command == "audit-verify":
+            return run_audit_verify(arguments.export, arguments.extends)
     except UserNotFound as missing:
         # Named rather than folded into the generic handler: "no account with
         # that address" is almost always a typo the operator can fix, and is

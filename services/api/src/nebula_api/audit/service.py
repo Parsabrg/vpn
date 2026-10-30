@@ -68,6 +68,19 @@ class AuditLogService:
             total = await session.scalar(count_statement)
         return AuditLogPage(items=[_to_entry(row) for row in rows], total=total or 0)
 
+    async def export_events(self, *, until: datetime) -> list[AuditLogEntry]:
+        """Every event recorded before `until`, oldest first, in a fixed order."""
+
+        # ponytail: the whole log in memory; stream it when it reaches millions of rows.
+        async with self._session_factory() as session:
+            statement = (
+                select(AuditLog)
+                .where(AuditLog.recorded_at < until)
+                .order_by(AuditLog.recorded_at, AuditLog.id)
+            )
+            rows = (await session.scalars(statement)).all()
+        return [_to_entry(row) for row in rows]
+
 
 def _conditions(filters: AuditLogFilters) -> list[ColumnElement[bool]]:
     conditions: list[ColumnElement[bool]] = []
