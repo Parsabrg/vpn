@@ -2,7 +2,7 @@ name: nebula
 
 services:
   postgres:
-    image: postgres:17.11
+    image: postgres:18.4
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-nebula}
       POSTGRES_USER: ${POSTGRES_SUPERUSER:-postgres}
