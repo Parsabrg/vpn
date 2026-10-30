@@ -12,7 +12,7 @@ requires-python = ">=3.12,<3.15"
 dependencies = [
   "anyio==4.15.1",
   "cryptography==50.0.2",
-  "fastapi==0.153.0",
+  "fastapi==0.162.0",
   "pydantic-settings==2.16.1",
   "uvicorn[standard]==0.54.0",
 ]
@@ -27,12 +27,12 @@ nebula-agent-reachability = "nebula_agent.reachability:main"
 
 [project.optional-dependencies]
 dev = [
-  "httpx2==2.15.1",
+  "httpx2==2.16.0",
   "mypy==2.4.0",
   "pip-audit==2.10.1",
   "pytest==9.1.1",
   "pytest-cov==7.1.0",
-  "ruff==0.17.1",
+  "ruff==0.17.3",
 ]
 
 [tool.hatch.build.targets.wheel]
