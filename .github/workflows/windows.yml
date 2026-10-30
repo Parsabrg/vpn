@@ -13,6 +13,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   portable-x64:
     runs-on: windows-latest
@@ -34,7 +38,8 @@ jobs:
         working-directory: apps/mobile
         shell: pwsh
         run: ./tool/build_windows_portable.ps1 -ApiBaseUrl https://api.example.invalid
-      - uses: actions/upload-artifact@v7
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: NebulaVPN-windows-x64-portable
           path: apps/mobile/dist/NebulaVPN-windows-x64-portable.zip

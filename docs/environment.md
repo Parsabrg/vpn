@@ -188,6 +188,12 @@ Agent settings are host-side only. `NEBULA_WG_CLIENT_POOL` must not overlap the 
 LAN, Docker networks, or common client networks. The deployment preflight command
 must reject overlaps and a pool too small for configured device limits.
 
+`install.sh` picks the pool once. A new install uses `NEBULA_WG_CLIENT_POOL` from
+its environment, or `10.77.0.0/20` (4094 devices); the server takes the range's
+first address. A rerun keeps what `wg0.conf` (or `agent.env`) already has, so
+servers installed with the earlier `10.77.0.0/24` stay on it. Give the server's
+database record the same range (`create-server --wireguard-client-pool`).
+
 `NEBULA_WG_CLIENT_ALLOWED_IPS=0.0.0.0/0,::/0` represents full tunnel. IPv6 must not
 be advertised until routing and leak protection are tested; the safer initial
 deployment may temporarily use IPv4-only `0.0.0.0/0` and document that limitation.

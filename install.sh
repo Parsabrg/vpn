@@ -35,12 +35,13 @@ SECRETS=$ETC/secrets
 STATE=$ETC/install.conf
 COMPOSE_FILE=$REPO/infrastructure/compose/production.yaml
 PROJECT=nebula-production
-XRAY_VERSION=26.3.27
+XRAY_VERSION=26.9.30
 HYSTERIA_VERSION=2.9.2
-# From the publishers' own .dgst / hashes.txt, checked 2026-10-26.
+# From the publishers' own .dgst / hashes.txt; Xray checked 2026-10-30,
+# Hysteria2 2026-10-26.
 declare -A XRAY_SHA=(
-  [amd64]=23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae
-  [arm64]=4d30283ae614e3057f730f67cd088a42be6fdf91f8639d82cb69e48cde80413c
+  [amd64]=f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e
+  [arm64]=9886f077f9fd8e6713b84c377c1c7db4e53b9bfa8c276a5bd12561139522b473
 )
 declare -A HYSTERIA_SHA=(
   [amd64]=86fef8e2f1b2bf41318ac96724eee6c3b449e4e510022cc89658b63a6713922a
@@ -89,7 +90,6 @@ compose() { docker compose -p "$PROJECT" --env-file "$ETC/compose.env" -f "$COMP
 # Adds WireGuard's NAT and client restrictions to a ufw before.rules file,
 # once (marked), leaving everything else in it as it was. $1 is the outgoing
 # interface, $2 the file.
-WG_POOL=10.77.0.0/24
 WG_BLOCKED="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
 wireguard_routing() {
   local wan=$1 file=$2 nat forward n
@@ -438,6 +438,16 @@ rm -f /etc/nginx/sites-enabled/default
 # paths, gRPC service name and Hysteria2 decoy. A new install picks its own;
 # one that already has agent.env keeps what its clients already use.
 envget() { [ -f $ETC/agent.env ] && sed -n "s/^$1=//p" $ETC/agent.env | tail -1; return 0; }
+# WireGuard's address range. A server that has one keeps it (wg0.conf first,
+# then agent.env); a new one takes NEBULA_WG_CLIENT_POOL, or a /20 (4094
+# devices). The server's address is the range's first one.
+WG_ADDR=$(sed -n 's/^Address *= *//p' /etc/wireguard/wg0.conf 2>/dev/null | head -1)
+[ -n "$WG_ADDR" ] || WG_ADDR=$(envget NEBULA_WG_SERVER_ADDRESS)
+if [ -z "$WG_ADDR" ]; then
+  WG_ADDR=$(python3 -c 'import ipaddress,sys; n=ipaddress.ip_network(sys.argv[1]); assert n.version == 4 and n.is_private and n.prefixlen <= 29; print(f"{next(n.hosts())}/{n.prefixlen}")' \
+    "${NEBULA_WG_CLIENT_POOL:-10.77.0.0/20}" 2>/dev/null) || die "NEBULA_WG_CLIENT_POOL must be a private IPv4 range like 10.77.0.0/20"
+fi
+WG_POOL=$(python3 -c 'import ipaddress,sys; print(ipaddress.ip_interface(sys.argv[1]).network)' "$WG_ADDR")
 if [ -f $ETC/agent.env ]; then
   XHTTP_PATH=$(envget NEBULA_XRAY_XHTTP_PATH); XHTTP_PATH=${XHTTP_PATH:-/xhttp}
   WS_PATH=$(envget NEBULA_XRAY_WS_PATH); WS_PATH=${WS_PATH:-/ws}
@@ -487,11 +497,15 @@ usermod -aG nebula-secrets nebula-agent; usermod -aG nebula-agent nebula-xray
 install -d -o nebula-agent -g nebula-agent -m 0700 /var/lib/nebula/wireguard
 install -d -o nebula-agent -g nebula-agent -m 0750 /etc/nebula/xray
 install -d -o nebula-agent -g root -m 2750 /etc/nebula/hysteria
-if [ "$(/usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print $2}')" = "" ]; then
+# A rerun brings an older Xray up to the pinned one; install(1) replaces the
+# file rather than writing into the running binary.
+if [ "$(/usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print $2}')" != "$XRAY_VERSION" ]; then
   zip=$([ $ARCH = amd64 ] && echo Xray-linux-64.zip || echo Xray-linux-arm64-v8a.zip)
   fetch -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION/$zip"
   echo "${XRAY_SHA[$ARCH]}  /tmp/xray.zip" | sha256sum -c --quiet || die "Xray download failed its checksum"
-  unzip -oq /tmp/xray.zip xray -d /usr/local/bin && chmod 0755 /usr/local/bin/xray
+  rm -rf /tmp/xray-new; unzip -oq /tmp/xray.zip xray -d /tmp/xray-new
+  install -m 0755 /tmp/xray-new/xray /usr/local/bin/xray
+  systemctl try-restart nebula-xray
 fi
 if [ ! -x /usr/local/bin/hysteria ]; then
   fetch -o /tmp/hysteria "https://github.com/apernet/hysteria/releases/download/app/v$HYSTERIA_VERSION/hysteria-linux-$ARCH"
@@ -513,8 +527,8 @@ EOF
 chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/nebula.sh
 if [ ! -f /etc/wireguard/wg0.conf ]; then
   umask 077
-  printf '[Interface]\nAddress = 10.77.0.1/24\nListenPort = 51820\nPostUp = wg set %%i private-key %s\n' \
-    $SECRETS/wireguard_server_private_key > /etc/wireguard/wg0.conf
+  printf '[Interface]\nAddress = %s\nListenPort = 51820\nPostUp = wg set %%i private-key %s\n' \
+    "$WG_ADDR" $SECRETS/wireguard_server_private_key > /etc/wireguard/wg0.conf
   umask 022
 fi
 systemctl enable --now wg-quick@wg0 >/dev/null 2>&1
@@ -580,8 +594,8 @@ NEBULA_WG_SERVER_PRIVATE_KEY_FILE=$SECRETS/wireguard_server_private_key
 NEBULA_AGENT_TLS_CERT_FILE=$SECRETS/agent_tls_cert
 NEBULA_AGENT_TLS_KEY_FILE=$SECRETS/agent_tls_key
 NEBULA_AGENT_TRUSTED_CLIENT_CA_FILE=$SECRETS/agent_ca
-NEBULA_WG_SERVER_ADDRESS=10.77.0.1/24
-NEBULA_WG_CLIENT_POOL=10.77.0.0/24
+NEBULA_WG_SERVER_ADDRESS=$WG_ADDR
+NEBULA_WG_CLIENT_POOL=$WG_POOL
 NEBULA_WG_LISTEN_PORT=51820
 NEBULA_WG_PUBLIC_ENDPOINT=$PUBLIC_IP:51820
 NEBULA_XRAY_ENABLED=true
