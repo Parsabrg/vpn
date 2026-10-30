@@ -106,6 +106,59 @@ void main() {
     );
   });
 
+  for (final int status in <int>[429, 503]) {
+    test('a refresh refused with $status reaches the caller as $status, '
+        'not as the 401', () async {
+      final _Always adapter = _Always(401);
+      final Dio dio = Dio(BaseOptions(baseUrl: 'https://api.example.test'))
+        ..httpClientAdapter = adapter;
+      dio.interceptors.add(
+        AuthInterceptor.withDependencies(
+          accessToken: () => 'expired',
+          refresh: () async =>
+              throw NebulaApiException(statusCode: status, detail: 'busy'),
+          fetch: (RequestOptions options) => dio.fetch<dynamic>(options),
+        ),
+      );
+
+      await expectLater(
+        dio.get<dynamic>('/v1/account'),
+        throwsA(
+          isA<DioException>().having(
+            (DioException e) => e.response?.statusCode,
+            'status',
+            status,
+          ),
+        ),
+      );
+    });
+  }
+
+  test('a refresh rejected with 401 still surfaces the original 401', () async {
+    final _Always adapter = _Always(401);
+    final Dio dio = Dio(BaseOptions(baseUrl: 'https://api.example.test'))
+      ..httpClientAdapter = adapter;
+    dio.interceptors.add(
+      AuthInterceptor.withDependencies(
+        accessToken: () => 'expired',
+        refresh: () async =>
+            throw const NebulaApiException(statusCode: 401, detail: 'revoked'),
+        fetch: (RequestOptions options) => dio.fetch<dynamic>(options),
+      ),
+    );
+
+    await expectLater(
+      dio.get<dynamic>('/v1/account'),
+      throwsA(
+        isA<DioException>().having(
+          (DioException e) => e.response?.statusCode,
+          'status',
+          401,
+        ),
+      ),
+    );
+  });
+
   test('a refresh that cannot reach the server is a connection failure, '
       'not a refused sign-in', () async {
     final _Always adapter = _Always(401);

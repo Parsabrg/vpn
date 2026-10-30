@@ -74,7 +74,7 @@ class AuthNotifier extends Notifier<AuthState> {
       state = AuthAuthenticated(tokens: tokens);
       unawaited(_loadMe(tokens.accessToken));
     } catch (error) {
-      if (_sessionRejected(error)) {
+      if (sessionRejected(error)) {
         await _forgetSession();
         state = const AuthUnauthenticated();
       } else {
@@ -96,7 +96,7 @@ class AuthNotifier extends Notifier<AuthState> {
   /// server, a timeout, a 503 while its auth store is down, a 429 -- none
   /// of those say anything about the session, and deleting it for them is
   /// what signed people out for being offline.
-  static bool _sessionRejected(Object error) {
+  static bool sessionRejected(Object error) {
     return error is NebulaApiException &&
         const <int>{400, 401, 403, 422}.contains(error.statusCode);
   }
@@ -219,7 +219,7 @@ class AuthNotifier extends Notifier<AuthState> {
       // expired: the request fails as offline, the stored session stays,
       // and the next request tries again. No retry loop either way; the
       // caller sees this error once.
-      if (_sessionRejected(error)) {
+      if (sessionRejected(error)) {
         await expireSession();
       }
       rethrow;
