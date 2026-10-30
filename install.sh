@@ -260,7 +260,17 @@ if [ -n "${NEBULA_INSTALL_PROXY:-}" ]; then remember NEBULA_INSTALL_PROXY "$NEBU
 step "Installing packages"
 export DEBIAN_FRONTEND=noninteractive
 apt-get -qq update
-apt-get -qq install -y ca-certificates curl openssl nginx certbot wireguard-tools python3-venv unzip acl ufw age >/dev/null
+apt-get -qq install -y ca-certificates curl openssl nginx certbot wireguard-tools python3-venv unzip acl ufw age fail2ban unattended-upgrades >/dev/null
+# Host hardening the first server got by hand (production-readiness audit H-1
+# and M-5): fail2ban's sshd jail (on by default in Debian/Ubuntu), security
+# updates installed daily, and swap on a small server with none.
+systemctl enable --now fail2ban >/dev/null 2>&1 || warn "fail2ban did not start: journalctl -u fail2ban"
+printf 'APT::Periodic::Update-Package-Lists "1";\nAPT::Periodic::Unattended-Upgrade "1";\n' > /etc/apt/apt.conf.d/20auto-upgrades
+if [ -z "$(swapon --show --noheadings)" ] && [ "$(awk '/MemTotal/{print $2}' /proc/meminfo)" -lt 4194304 ] \
+  && [ "$(df --output=avail -k / | tail -1)" -gt 6291456 ]; then
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile ' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
 if [ -z "$JOIN_URL" ]; then
   if ! command -v docker >/dev/null || ! docker compose version >/dev/null 2>&1; then
     fetch https://get.docker.com -o /tmp/get-docker.sh
