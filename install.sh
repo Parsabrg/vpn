@@ -18,6 +18,9 @@
 #   sudo ./install.sh --restore nebula-backup-<time>.tar.gz.age
 # It asks for the backup key (or reads NEBULA_BACKUP_KEY_FILE) and nothing else.
 #
+# Updating to the newest release (a v* tag; or name one), then a rerun:
+#   sudo ./install.sh --update [v0.1.34]
+#
 # Changing which protocols this server offers, or their ports (firewall,
 # nginx, WireGuard and the control plane follow):
 #   sudo ./install.sh --configure
@@ -119,6 +122,24 @@ case "$(uname -m)" in
   x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;;
   *) die "unsupported CPU architecture $(uname -m)" ;;
 esac
+if [ "${1:-}" = --update ]; then
+  # A release, not whatever main holds: the newest v* tag, or the one given.
+  # Shows what changed, then installs from it as a rerun would.
+  g() { git -c safe.directory="$REPO" -C "$REPO" "$@"; }
+  g rev-parse --git-dir >/dev/null 2>&1 || die "$REPO is not a git checkout: copy the release here, then run sudo ./install.sh"
+  [ -z "$(g status --porcelain --untracked-files=no)" ] || die "$REPO has local changes (git status); undo or commit them first"
+  HTTPS_PROXY=${NEBULA_INSTALL_PROXY:-} g fetch -q --tags origin || die "could not fetch the releases"
+  tag=${2:-$(g tag -l 'v*' --sort=-v:refname | awk 'NR == 1')}
+  g rev-parse -q --verify "refs/tags/$tag" >/dev/null || die "there is no release ${tag:-at all}"
+  # Never backwards: older code than the database's migrations would not start.
+  g merge-base --is-ancestor HEAD "refs/tags/$tag" \
+    || die "$tag is not newer than this checkout ($(g describe --tags --always)); wait for the next release"
+  step "Updating $(g describe --tags --always) to $tag"
+  g log --oneline --no-decorate HEAD.."refs/tags/$tag" | awk 'NR <= 40'
+  echo "Release notes: $REPO/CHANGELOG.md"
+  g -c advice.detachedHead=false checkout -q "refs/tags/$tag"
+  exec "$REPO/install.sh"
+fi
 RESTORE_DIR=""
 if [ "${1:-}" = --restore ]; then
   backup=${2:?usage: sudo ./install.sh --restore <backup file>}
@@ -793,7 +814,7 @@ ${green}${bold}This server has joined.${reset}
 
   It appears in the admin panel under Server health. Assign it to users
   there; its protocols were enabled when it enrolled.
-  To update later:  git pull && sudo ./install.sh
+  To update later:  sudo ./install.sh --update
 
 EOF
   exit 0
@@ -869,7 +890,7 @@ ${green}${bold}Nebula is installed.${reset}
 
 EOF
 [ "$NEBULA_EMAIL_MODE" = skip ] && echo "  Email is not set up yet; people cannot get activation links. Rerun ./install.sh to add it."
-echo "  To update later:  git pull && sudo ./install.sh"
+echo "  To update later:  sudo ./install.sh --update"
 echo "  To rebuild after losing this server:  sudo ./install.sh --restore <backup file>"
 [ -n "$RESTORE_DIR" ] && rm -rf "$RESTORE_DIR"
 

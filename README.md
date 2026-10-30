@@ -106,8 +106,11 @@ finally the administrator's password; everything else (Docker, keys, the
 certificate, nginx, the firewall, Xray, Hysteria2, WireGuard, the VPN agent,
 the protocols, daily encrypted backups) is done for you, in about 15
 minutes. Before it asks for the certificate it tells you the two DNS records
-to create. Rerun it at any time to update or to change the answers; it keeps
-everything already set up.
+to create. Rerun it at any time to change the answers; it keeps everything
+already set up. To update, `sudo ./install.sh --update` moves the checkout to
+the newest release tag (never backwards, never over local changes), lists what
+changed, and reruns from it; `--update v0.1.34` picks a release.
+[CHANGELOG.md](CHANGELOG.md) says what each release changed.
 
 - **Server inside Iran:** PyPI's download host is unreachable there. The
   installer notices and asks for an HTTP proxy for the build. Pick a domain
