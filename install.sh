@@ -507,7 +507,7 @@ if [ "$(/usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print $2}')" != "$X
   echo "${XRAY_SHA[$ARCH]}  /tmp/xray.zip" | sha256sum -c --quiet || die "Xray download failed its checksum"
   rm -rf /tmp/xray-new; unzip -oq /tmp/xray.zip xray -d /tmp/xray-new
   install -m 0755 /tmp/xray-new/xray /usr/local/bin/xray
-  systemctl try-restart nebula-xray
+  ! systemctl is-active -q nebula-xray || systemctl restart nebula-xray
 fi
 if [ ! -x /usr/local/bin/hysteria ]; then
   fetch -o /tmp/hysteria "https://github.com/apernet/hysteria/releases/download/app/v$HYSTERIA_VERSION/hysteria-linux-$ARCH"
