@@ -441,7 +441,9 @@ envget() { [ -f $ETC/agent.env ] && sed -n "s/^$1=//p" $ETC/agent.env | tail -1;
 # WireGuard's address range. A server that has one keeps it (wg0.conf first,
 # then agent.env); a new one takes NEBULA_WG_CLIENT_POOL, or a /20 (4094
 # devices). The server's address is the range's first one.
-WG_ADDR=$(sed -n 's/^Address *= *//p' /etc/wireguard/wg0.conf 2>/dev/null | head -1)
+WG_ADDR=
+# Under pipefail a missing file would end the install here.
+[ ! -f /etc/wireguard/wg0.conf ] || WG_ADDR=$(sed -n 's/^Address *= *//p' /etc/wireguard/wg0.conf | head -1)
 [ -n "$WG_ADDR" ] || WG_ADDR=$(envget NEBULA_WG_SERVER_ADDRESS)
 if [ -z "$WG_ADDR" ]; then
   WG_ADDR=$(python3 -c 'import ipaddress,sys; n=ipaddress.ip_network(sys.argv[1]); assert n.version == 4 and n.is_private and n.prefixlen <= 29; print(f"{next(n.hosts())}/{n.prefixlen}")' \
