@@ -402,6 +402,22 @@ ok "names point at $PUBLIC_IP"
 step "Certificate"
 install -d /var/www/nebula-acme /etc/nginx/snippets
 rm -f /etc/nginx/sites-enabled/default
+# Names a censor's scanner cannot predict: every install used the same
+# paths, gRPC service name and Hysteria2 decoy. A new install picks its own;
+# one that already has agent.env keeps what its clients already use.
+envget() { [ -f $ETC/agent.env ] && sed -n "s/^$1=//p" $ETC/agent.env | tail -1; return 0; }
+if [ -f $ETC/agent.env ]; then
+  XHTTP_PATH=$(envget NEBULA_XRAY_XHTTP_PATH); XHTTP_PATH=${XHTTP_PATH:-/xhttp}
+  WS_PATH=$(envget NEBULA_XRAY_WS_PATH); WS_PATH=${WS_PATH:-/ws}
+  GRPC_NAME=$(envget NEBULA_XRAY_GRPC_SERVICE_NAME); GRPC_NAME=${GRPC_NAME:-grpc}
+  VMESS_WS_PATH=$(envget NEBULA_XRAY_VMESS_WS_PATH); VMESS_WS_PATH=${VMESS_WS_PATH:-/vw}
+  DECOY=$(envget NEBULA_XRAY_HYSTERIA_MASQUERADE_URL); DECOY=${DECOY:-https://news.ycombinator.com}
+else
+  XHTTP_PATH=/$(openssl rand -hex 6); WS_PATH=/$(openssl rand -hex 6)
+  GRPC_NAME=s$(openssl rand -hex 5); VMESS_WS_PATH=/$(openssl rand -hex 6)
+  DECOYS=(https://www.wikipedia.org https://www.mozilla.org https://www.apple.com https://www.bing.com https://www.debian.org https://www.python.org https://www.gnu.org https://news.ycombinator.com)
+  DECOY=${DECOYS[$(( $(od -An -N2 -tu2 /dev/urandom) % ${#DECOYS[@]} ))]}
+fi
 sed -e "s/panel.example.com/$PANEL/g" -e "s/api.example.com/$APIHOST/g" -e "s/vpn.example.com/$NEBULA_DOMAIN/g" \
   "$REPO/infrastructure/nginx/nebula-8444.conf" > /etc/nginx/sites-available/nebula
 # A joined server serves no panel or API: its site is the port-80 block alone.
@@ -424,6 +440,7 @@ ln -sf /etc/nginx/sites-available/nebula /etc/nginx/sites-enabled/nebula
 cp "$REPO/infrastructure/nginx/nebula-ratelimit.conf" /etc/nginx/conf.d/
 cp "$REPO/infrastructure/nginx/cloudflare-real-ip.conf" /etc/nginx/snippets/
 sed -e "s/vpn.example.com/$NEBULA_DOMAIN/g" -e "s#live/$NEBULA_DOMAIN/#live/$CERTNAME/#g" -e "s/ cdn.example.com//" \
+  -e "s#location /xhttp {#location $XHTTP_PATH {#" -e "s#location /ws {#location $WS_PATH {#" -e "s#location /grpc/ {#location /$GRPC_NAME/ {#" \
   "$REPO/infrastructure/nginx/xray-8445.conf" > /etc/nginx/conf.d/xray-8445.conf
 nginx -t >/dev/null 2>&1 || { nginx -t; die "nginx rejected the configuration"; }
 systemctl reload nginx
@@ -545,6 +562,11 @@ NEBULA_XRAY_WS_ENABLED=true
 NEBULA_XRAY_TCP_ENABLED=true
 NEBULA_XRAY_HYSTERIA_ENABLED=true
 NEBULA_XRAY_HYSTERIA_OBFS_PASSWORD=$(openssl rand -hex 16)
+NEBULA_XRAY_XHTTP_PATH=$XHTTP_PATH
+NEBULA_XRAY_WS_PATH=$WS_PATH
+NEBULA_XRAY_GRPC_SERVICE_NAME=$GRPC_NAME
+NEBULA_XRAY_VMESS_WS_PATH=$VMESS_WS_PATH
+NEBULA_XRAY_HYSTERIA_MASQUERADE_URL=$DECOY
 NEBULA_XRAY_TLS_CERT_FILE=$CERT/fullchain.pem
 NEBULA_XRAY_TLS_KEY_FILE=$CERT/privkey.pem
 EOF
