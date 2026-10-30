@@ -109,13 +109,16 @@ transaction.
 
 - Python: Ruff lint/format, strict mypy, pytest, and coverage thresholds for each
   service independently.
-- Admin: Prettier, ESLint, strict TypeScript, Vitest, production Next.js build, and
+- Admin: Prettier, ESLint, strict TypeScript, Vitest with a coverage minimum over
+  every source file (`vitest.config.ts`), production Next.js build, and
   `npm audit` for production dependencies.
 - Mobile: Dart format, Flutter analyze, and Flutter widget tests.
 - Database: empty-database upgrade, schema-head verification, downgrade/upgrade
   smoke coverage where safe, and PostgreSQL constraint checks.
 - Infrastructure: Compose model validation plus a build-and-health smoke test.
 - Supply chain: dependency review, Dependabot, Gitleaks, and Trivy image scans.
+- Code scanning: CodeQL (GitHub's default setup, configured in the repository's
+  settings rather than a workflow file) for Python, TypeScript and the workflows.
 
 GitHub Actions have read-only default permissions and third-party actions are
 pinned to full commit SHAs. Production secrets must not be added to CI or local

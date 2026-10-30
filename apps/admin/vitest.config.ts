@@ -19,7 +19,17 @@ export default defineConfig({
     setupFiles: ["./vitest.setup.ts"],
     include: ["tests/**/*.test.{ts,tsx}"],
     coverage: {
-      reporter: ["text", "html"],
+      provider: "v8",
+      reporter: ["text-summary", "html"],
+      // Every source file counts, tested or not.
+      include: [
+        "app/**/*.{ts,tsx}",
+        "components/**/*.{ts,tsx}",
+        "lib/**/*.{ts,tsx}",
+        "proxy.ts",
+      ],
+      // The level on 2026-10-30, so it cannot fall; raise it as tests are added.
+      thresholds: { statements: 53, branches: 51, functions: 42, lines: 53 },
     },
   },
 });
