@@ -11,6 +11,7 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- `NEBULA_ADMIN_ALLOW` limits the admin panel and admin API to listed addresses.
 - `sudo ./install.sh --update` moves a server to the newest release tag, never
   backwards, and shows what changed.
 - Login and password-reset limits fit many users behind one shared address (#21).

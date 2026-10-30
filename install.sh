@@ -13,6 +13,8 @@
 #   NEBULA_DOMAIN, NEBULA_ADMIN_EMAIL, NEBULA_EMAIL_MODE (smtp|resend|skip),
 #   NEBULA_SMTP_HOST, NEBULA_SMTP_PORT, NEBULA_SMTP_USERNAME, NEBULA_SMTP_PASSWORD,
 #   NEBULA_RESEND_API_KEY, NEBULA_EMAIL_FROM, NEBULA_INSTALL_PROXY, NEBULA_ASSUME_YES=1
+# Optional: NEBULA_ADMIN_ALLOW (addresses that may open the admin panel;
+# default any), NEBULA_WG_CLIENT_POOL (WireGuard's range on a new install).
 #
 # Rebuilding a lost server from a backup, on a fresh one:
 #   sudo ./install.sh --restore nebula-backup-<time>.tar.gz.age
@@ -454,6 +456,22 @@ ok "names point at $PUBLIC_IP"
 
 step "Certificate"
 install -d /var/www/nebula-acme /etc/nginx/snippets
+# Who may open the admin panel and the admin API: NEBULA_ADMIN_ALLOW, addresses
+# or ranges separated by commas; "any" (the default) is everyone. Saved like
+# the other answers, so set NEBULA_ADMIN_ALLOW=any to open it again.
+ADMIN_ALLOW=${NEBULA_ADMIN_ALLOW:-any}
+admin_allow=$(python3 -c '
+import ipaddress, sys
+v = sys.argv[1].strip()
+if v != "any":
+    nets = [ipaddress.ip_network(x.strip(), strict=False) for x in v.split(",") if x.strip()]
+    assert nets
+    for n in nets:
+        print(f"allow {n};")
+    print("deny all;")' "$ADMIN_ALLOW" 2>/dev/null) \
+  || die "NEBULA_ADMIN_ALLOW must be any, or addresses and ranges separated by commas"
+printf '# From NEBULA_ADMIN_ALLOW=%s (install.sh).\n%s\n' "$ADMIN_ALLOW" "$admin_allow" > /etc/nginx/snippets/nebula-admin-allow.conf
+remember NEBULA_ADMIN_ALLOW "$ADMIN_ALLOW"
 rm -f /etc/nginx/sites-enabled/default
 # Names a censor's scanner cannot predict: every install used the same
 # paths, gRPC service name and Hysteria2 decoy. A new install picks its own;

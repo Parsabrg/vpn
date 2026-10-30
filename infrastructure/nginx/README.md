@@ -20,7 +20,9 @@ should point its `API_BASE_URL` at `https://<host>:8445` instead of
 
 This repository owns the nginx files `install.sh` installs: `nebula-8444.conf`
 (the panel and API on `:8444`), `xray-8445.conf` (the client-facing `:8445`),
-`nebula-ratelimit.conf` and `cloudflare-real-ip.conf`. The first VPS predates
+`nebula-ratelimit.conf` and `cloudflare-real-ip.conf`; it writes
+`snippets/nebula-admin-allow.conf` itself, from `NEBULA_ADMIN_ALLOW` (who may
+open the panel and `/v1/admin/`; empty is everyone). The first VPS predates
 the installer and has a hand-made `:8444` block instead; on that host
 `xray-8445.conf` is added beside it as a second server block on a different
 port.
