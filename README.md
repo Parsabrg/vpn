@@ -71,10 +71,13 @@ infrastructure/
   backup/         Backup and restore
   polkit/         What the agent may restart
 docs/             Architecture, threat model, ADRs, runbooks, roadmap
-.github/          CI (a self-hosted runner) and security scans
+.github/          CI on GitHub-hosted runners, security scans, Dependabot
 ```
 
 ## Documents
+
+Pull requests written as "archive #N" are in the private development history
+this repository was published from; plain "#N" is a pull request here.
 
 - [Architecture](docs/architecture.md) and [threat model](docs/threat-model.md)
 - [Deployment](docs/runbooks/deployment.md) and

@@ -12,13 +12,13 @@ setting this assistant doesn't change unilaterally)
 
 A separate bug found and fixed the same day, unrelated to this audit --
 Hysteria2 reporting the tunnel connected before it actually was -- is
-tracked in its own PR, #199, not in this table.
+tracked in its own PR, archive #199, not in this table.
 
 ## Critical
 
 | # | Finding | Status | Where |
 |---|---|---|---|
-| C-1 | A connected VPN user could reach the server's own loopback, the Docker network (Postgres/Redis), and Xray's unauthenticated HandlerService, because the `freedom`/`direct` outbounds carried no destination ACL | ✅ | `services/vpn-agent/src/nebula_agent/drivers/egress.py` (shared blocklist), wired into `xray_config_store.py` and `hysteria_config_store.py`. [#198](https://github.com/Parsabrg/vpn/pull/198), merged and deployed 2026-09-17. **Confirmed closed live**: from the connected phone, a request to the Docker network's Postgres address now resets in 0.22s (Xray's blackhole outbound, before any real dial) vs. a 6s hang with no reset for a genuinely-unreachable-but-not-blocked external port |
+| C-1 | A connected VPN user could reach the server's own loopback, the Docker network (Postgres/Redis), and Xray's unauthenticated HandlerService, because the `freedom`/`direct` outbounds carried no destination ACL | ✅ | `services/vpn-agent/src/nebula_agent/drivers/egress.py` (shared blocklist), wired into `xray_config_store.py` and `hysteria_config_store.py`. [archive #198](https://github.com/Parsabrg/vpn/pull/198), merged and deployed 2026-09-17. **Confirmed closed live**: from the connected phone, a request to the Docker network's Postgres address now resets in 0.22s (Xray's blackhole outbound, before any real dial) vs. a 6s hang with no reset for a genuinely-unreachable-but-not-blocked external port |
 | C-1b | The C-1 block could be walked around **by name**: `localhost` has no public answer, so the address rule never saw an address, and `freedom` then asked the host's resolver, which answers 127.0.0.1. Measured on the production Xray (26.3.27) on 2026-10-15: a client reached a loopback-only port as `localhost:<port>`; as the real `nebula-xray` user, another local Xray's API (127.0.0.1:10085), the API (8000) and admin (3000) were open. The host-firewall layer described under C-1 had never been put in place | ✅ | Host: ufw rules refusing new connections from `nebula-xray` to the blocked ranges, before ufw's loopback accept (deployment.md, "Host firewall for the transports"), live 2026-10-15. Config: `freedom` resolves with Xray's public resolvers (`UseIP`) and `localhost` is refused by name (`xray_config_store.py`). Hysteria2 tested the same way and was not affected (its resolver serves its outbound too) |
 
 ## High
@@ -27,7 +27,7 @@ tracked in its own PR, #199, not in this table.
 |---|---|---|---|
 | H-1 | SSH allows password auth + root login; no fail2ban; 6,709 failed root attempts / 24h from 188 IPs; `reza` is a stale sudo+password account | ✅ | Applied on the VPS 2026-09-17: fail2ban installed and enabled; `PasswordAuthentication no`; `PermitRootLogin prohibit-password`; `reza` password locked. Key-based login re-verified with `ssh -o BatchMode=yes` after the reload, which fails outright rather than prompting, so there was no lockout window. **The password setting lives in `/etc/ssh/sshd_config.d/50-cloud-init.conf`, not `sshd_config`** — that drop-in is included at line 12, before the main file's own (commented) directive, and OpenSSH keeps the first value it sees, so editing only `sshd_config` is a silent no-op. Confirm with `sshd -T`, never by reading one file. **Accounts and passwords on this host are off-limits from here on, by the operator's instruction** — the `reza` lock is the last such change |
 | H-2 | Services that are not Nebula's share the production host and root | 🔒 | Each runs with a systemd drop-in (`InaccessiblePaths=-/etc/nebula -/var/lib/docker`), verified through `/proc/<pid>/root`: they cannot read Nebula's keys or the database files, while `nebula-vpn-agent` still can. This narrows the path; a real root exploit can leave a namespace. A host of Nebula's own removes it, and is worth doing before going public |
-| H-3 | ~~IPv6 traffic bypasses the tunnel~~ — **corrected on re-check**: phone's `Routes:` show `::/0 -> tun0`, IPv6 *is* captured. Real problem found instead: an IPv6 resolver in the DNS list was routing `::/0` into a tunnel that carries no IPv6, so those lookups just failed | ✅ | `apps/mobile/lib/core/xray/xray_config.dart` (IPv4-only resolver lists, `_isIpv6Literal` filter on chosen servers), `services/api/src/nebula_api/provisioning/service.py` (`_AD_BLOCK_DNS_SERVER`). Server-side half deployed with #198; the client-side half ships in the next mobile release |
+| H-3 | ~~IPv6 traffic bypasses the tunnel~~ — **corrected on re-check**: phone's `Routes:` show `::/0 -> tun0`, IPv6 *is* captured. Real problem found instead: an IPv6 resolver in the DNS list was routing `::/0` into a tunnel that carries no IPv6, so those lookups just failed | ✅ | `apps/mobile/lib/core/xray/xray_config.dart` (IPv4-only resolver lists, `_isIpv6Literal` filter on chosen servers), `services/api/src/nebula_api/provisioning/service.py` (`_AD_BLOCK_DNS_SERVER`). Server-side half deployed with archive #198; the client-side half ships in the next mobile release |
 | H-4 | No HSTS/CSP/`X-Frame-Options` on the admin panel (`:8444`) or API edge | ✅ | HSTS, `X-Frame-Options` and the rest deployed on both ports 2026-09-17 and confirmed live with `curl -I` after the reboot. **CSP was not** (this row said it was): added 2026-10-30 by the panel itself (`apps/admin/proxy.ts`), a per-request nonce with `'strict-dynamic'`, this origin only otherwise, plus a `Permissions-Policy`. `:8445` from the tracked `xray-8445.conf`; `:8444` by hand in `/etc/nginx/sites-enabled/nebula` (untracked, host-specific), on both the `panel.` and `api.` blocks. Backups of that file now live in `/root/nginx-backups/`, **not** beside it -- `nginx.conf` globs `sites-enabled/*` with no extension filter, so a `.bak` left there is loaded as a second copy of every server block it contains |
 
 ## Medium
@@ -105,7 +105,7 @@ settings and are the operator's to run.
 
 ## Deployment log
 
-2026-09-17: #198 merged and deployed to production in the same session.
+2026-09-17: archive #198 merged and deployed to production in the same session.
 `git pull --ff-only` on `/opt/nebula`, rebuilt and recreated `api`/`worker`/
 `admin`/`usage`, `migrate` confirmed a no-op (this PR added no schema
 change), `nebula-prune.{service,timer}` installed and enabled,
