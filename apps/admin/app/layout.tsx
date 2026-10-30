@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 
 import "./globals.css";
 
+// Rendered per request, so Next can put proxy.ts's CSP nonce on its scripts:
+// a page built ahead of time would carry none and be blocked.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: {
     default: "Nebula Administration",
