@@ -25,6 +25,10 @@ nebula-agent-healthcheck = "nebula_agent.healthcheck:main"
 nebula-agent-alert = "nebula_agent.healthcheck:alert_unit_main"
 nebula-agent-reachability = "nebula_agent.reachability:main"
 
+# The build backend, so requirements.lock pins it with hashes too.
+[dependency-groups]
+build = ["hatchling==1.32.4"]
+
 [project.optional-dependencies]
 dev = [
   "httpx2==2.16.0",

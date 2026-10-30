@@ -15,6 +15,8 @@ Bug reports and pull requests are welcome. For a security problem, see
   | `apps/mobile` | `dart format --set-exit-if-changed lib test`, `flutter analyze --fatal-infos`, `flutter test` |
   | shell scripts | `shellcheck` |
 
+- Changed a Python dependency? Run `make locks` and commit the
+  `requirements.lock` files it changes.
 - `install.sh` must stay safe to run again on an installed server. When a
   default changes, servers that already have a value keep it.
 - Update the docs the change affects in the same pull request (README,

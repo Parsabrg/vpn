@@ -20,13 +20,15 @@ WORKDIR /app
 RUN addgroup -S -g 10001 nebula \
     && adduser -S -D -H -u 10001 -G nebula -s /sbin/nologin nebula
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
 # pip is not needed at runtime, and the copy in the base image carries its
 # own old certifi, urllib3, msgpack and setuptools that scanners flag.
-RUN python -m pip install --no-cache-dir .     && python -m pip uninstall --yes pip setuptools wheel
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements.lock \
+    && python -m pip install --no-cache-dir --no-deps --no-build-isolation . \
+    && python -m pip uninstall --yes pip setuptools wheel
 
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod 0755 /usr/local/bin/entrypoint.sh
