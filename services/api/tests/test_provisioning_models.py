@@ -108,8 +108,10 @@ def test_wireguard_address_and_uniqueness_are_database_enforced() -> None:
 
     for index_name, expected_columns in (
         ("uq_wireguard_peers_server_address_live", ("vpn_server_id", "assigned_address")),
-        ("uq_wireguard_peers_live_device", ("device_id",)),
-        ("uq_wireguard_peers_public_key_live", ("public_key",)),
+        # Per server: a device holds a peer, with its one keypair, on each
+        # server it uses.
+        ("uq_wireguard_peers_live_device", ("device_id", "vpn_server_id")),
+        ("uq_wireguard_peers_public_key_live", ("vpn_server_id", "public_key")),
     ):
         index = next(
             index

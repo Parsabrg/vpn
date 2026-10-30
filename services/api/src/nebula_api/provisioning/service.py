@@ -276,6 +276,10 @@ class ProvisioningService:
                 select(WireGuardPeer)
                 .where(
                     WireGuardPeer.device_id == device.id,
+                    # Per server: a device holds a peer on each server it
+                    # uses. Without this, asking a second server found the
+                    # first one's peer and pushed it to the wrong agent.
+                    WireGuardPeer.vpn_server_id == server.id,
                     WireGuardPeer.state.in_(_LIVE_PEER_STATES),
                 )
                 .with_for_update()
@@ -590,6 +594,11 @@ class ProvisioningService:
                 .where(
                     XrayClient.device_id == device.id,
                     XrayClient.protocol_profile_id == profile.id,
+                    # Per server, as above: the second server's request
+                    # reused the first's client, provisioned it on the second
+                    # server's agent and left it filed under the first, so
+                    # the app was told its access had ended (2026-10-30).
+                    XrayClient.vpn_server_id == server.id,
                     XrayClient.state.in_(_LIVE_PEER_STATES),
                 )
                 .with_for_update()
