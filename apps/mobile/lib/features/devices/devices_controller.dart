@@ -6,6 +6,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/account/account_repository.dart';
+import '../../core/auth/auth_notifier.dart';
+import '../../core/auth/auth_state.dart';
 import '../../core/diagnostics/server_reach.dart';
 import '../../core/free/free_mode.dart';
 import '../../core/network/api_client.dart';
@@ -1691,7 +1693,15 @@ class DevicesController extends Notifier<DevicesState> {
         account = await accounts.fetchAccount();
         devices = await accounts.listDevices();
       } on NebulaApiException catch (error) {
-        if (error.statusCode == 401 || error.statusCode == 403) {
+        if (!ref.mounted) {
+          return;
+        }
+        // A 401 ends the tunnel only once the sign-in has really expired: a
+        // refresh refused for a reason that is not the session (a 429 or a
+        // 503) used to arrive here as the 401 it followed, and took a
+        // connected tunnel down with the user still signed in (2026-10-30).
+        if ((error.statusCode == 401 && !ref.read(stillSignedInProvider)()) ||
+            error.statusCode == 403) {
           // The session is over, not merely unreachable: the device was
           // revoked or the account disabled. Signing out follows; the tunnel
           // goes now, without asking a server that will not answer.
@@ -2806,6 +2816,13 @@ final tunnelMovesDataProvider =
         return _receives('https://speed.cloudflare.com$path', dataProbeBytes);
       },
     );
+
+/// Whether the sign-in is still good: false once the session expired or was
+/// signed out. See DevicesController._checkAccess.
+final stillSignedInProvider = Provider<bool Function()>(
+  (Ref ref) =>
+      () => ref.read(authNotifierProvider) is AuthAuthenticated,
+);
 
 /// How soon the traffic watch asks again: once after a connect, and after
 /// an unanswered reading. See DevicesController._checkTrafficSoon.

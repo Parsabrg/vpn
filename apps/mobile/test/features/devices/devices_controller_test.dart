@@ -177,6 +177,7 @@ _harness({
   Duration? trafficInterval,
   Duration? trafficRecheck,
   Future<bool> Function(LocalProxy?)? tunnelMovesData,
+  bool stillSignedIn = false,
   bool trafficMeaningful = true,
   bool Function()? appInFront,
   List<void Function()>? onResume,
@@ -265,6 +266,8 @@ _harness({
       trafficRecheckDelayProvider.overrideWithValue(
         trafficRecheck ?? const Duration(hours: 1),
       ),
+      // Signed out unless a test says otherwise: a 401 ends the tunnel.
+      stillSignedInProvider.overrideWithValue(() => stillSignedIn),
       // No real download in a unit test.
       tunnelMovesDataProvider.overrideWithValue(
         tunnelMovesData ?? (_) async => true,
@@ -4444,6 +4447,32 @@ void _accessTests() {
       _accounts(devices: <AccountDevice>[]),
       'Your access to this server has ended',
     );
+  });
+
+  test('a 401 while still signed in leaves the tunnel up', () async {
+    // A refresh refused with a 429 or 503 once surfaced as this 401; the
+    // session was fine, and the tunnel must stay.
+    final FakeAccountRepository accounts = _accounts()
+      ..accountError = const NebulaApiException(
+        statusCode: 401,
+        detail: 'Authentication required',
+      );
+    final harness = _harness(
+      accessInterval: interval,
+      accounts: accounts,
+      stillSignedIn: true,
+    );
+    addTearDown(harness.container.dispose);
+    await connectXray(harness.container, harness.repository);
+    harness.tunnel.vpnOwner = VpnOwner.own;
+
+    await Future<void>.delayed(interval * 20);
+
+    final DevicesState state = harness.container.read(
+      devicesControllerProvider,
+    );
+    expect(state.tunnelEstablished, isTrue);
+    expect(harness.xrayTunnel.disconnectCalls, 0);
   });
 
   test(

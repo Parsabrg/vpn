@@ -131,6 +131,35 @@ class AuthInterceptor extends Interceptor {
           error: refreshError,
         ),
       );
+    } on NebulaApiException catch (refreshError) {
+      if (AuthNotifier.sessionRejected(refreshError)) {
+        // Refused for real: AuthNotifier has expired the session; the
+        // original 401 is what the caller sees, never a retry loop.
+        handler.next(err);
+        return;
+      }
+      // The server answered the refresh but did not judge the session: a
+      // 429 (rate limited) or a 503 (its auth store down). The session is
+      // fine; the caller sees that answer, not the 401 it followed, which
+      // read as signed out and took a connected tunnel down (2026-10-30).
+      handler.next(
+        DioException(
+          requestOptions: request,
+          type: DioExceptionType.badResponse,
+          error: refreshError,
+          response: Response<dynamic>(
+            requestOptions: request,
+            statusCode: refreshError.statusCode,
+            data: <String, dynamic>{'detail': refreshError.detail},
+            headers: Headers.fromMap(<String, List<String>>{
+              if (refreshError.retryAfter != null)
+                'retry-after': <String>[
+                  '${refreshError.retryAfter!.inSeconds}',
+                ],
+            }),
+          ),
+        ),
+      );
     } catch (_) {
       // Refresh itself failed (e.g. session revoked) -- AuthNotifier has
       // already transitioned to AuthSessionExpired and cleared storage via
