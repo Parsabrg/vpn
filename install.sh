@@ -136,8 +136,8 @@ if [ "${1:-}" = --restore ]; then
   age --decrypt -i "$key" "$backup" | tar -xzf - -C "$RESTORE_DIR" || die "that key does not open this backup"
   install -d -m 0755 $ETC
   cp -a "$RESTORE_DIR/config/." $ETC/
-  # The same key keeps encrypting: backup.env names its public half.
-  install -m 0600 "$key" $ETC/backup-key.txt
+  # Not kept on the server: encrypting needs only the public half, which
+  # backup.env already names. A copy here would open every backup.
   [ -z "${NEBULA_BACKUP_KEY_FILE:-}" ] && rm -f "$key"
   getent group nebula-secrets >/dev/null || groupadd --gid 9443 nebula-secrets
   install -d -o root -g nebula-secrets -m 0750 $SECRETS
@@ -244,6 +244,26 @@ case $NEBULA_EMAIL_MODE in
   *) NEBULA_EMAIL_FROM=${NEBULA_EMAIL_FROM:-"Nebula VPN <no-reply@$NEBULA_DOMAIN>"} ;;
 esac
 remember NEBULA_EMAIL_MODE "$NEBULA_EMAIL_MODE"; remember NEBULA_EMAIL_FROM "$NEBULA_EMAIL_FROM"
+
+step "Backups off this server"
+if [ -z "${NEBULA_BACKUP_OFFSITE:-}" ] && [ -t 0 ]; then
+  echo "Backups are encrypted and kept on this server; a copy elsewhere survives losing it."
+  echo "  1) Backblaze B2 (or any S3-compatible bucket)"
+  echo "  2) Keep them on this server only"
+  ask NEBULA_BACKUP_OFFSITE "Choose 1 or 2" 1
+fi
+case ${NEBULA_BACKUP_OFFSITE:-local} in 1|b2) NEBULA_BACKUP_OFFSITE=b2 ;; *) NEBULA_BACKUP_OFFSITE=local ;; esac
+if [ "$NEBULA_BACKUP_OFFSITE" = b2 ]; then
+  ask NEBULA_BACKUP_B2_BUCKET "Bucket name"
+  ask NEBULA_BACKUP_B2_ENDPOINT "S3 endpoint (e.g. https://s3.us-west-004.backblazeb2.com)"
+  [ -s $SECRETS/b2_key_id ] || ask NEBULA_BACKUP_B2_KEY_ID "Application key ID"
+  [ -s $SECRETS/b2_application_key ] || ask NEBULA_BACKUP_B2_APPLICATION_KEY "Application key (hidden)" "" secret
+  remember NEBULA_BACKUP_B2_BUCKET "$NEBULA_BACKUP_B2_BUCKET"
+  remember NEBULA_BACKUP_B2_ENDPOINT "$NEBULA_BACKUP_B2_ENDPOINT"
+else
+  warn "backups stay on this server only: if it is lost, so are they. Copy /var/backups/nebula elsewhere, or rerun and choose 1."
+fi
+remember NEBULA_BACKUP_OFFSITE "$NEBULA_BACKUP_OFFSITE"
 fi
 
 step "Network check"
@@ -332,6 +352,8 @@ chmod 0640 $ETC/compose.env
 [ -n "${NEBULA_SMTP_PASSWORD:-}" ] && printf '%s' "$NEBULA_SMTP_PASSWORD" > $SECRETS/smtp_password
 [ -n "${NEBULA_RESEND_API_KEY:-}" ] && printf '%s' "$NEBULA_RESEND_API_KEY" > $SECRETS/resend_api_key
 touch $SECRETS/smtp_password $SECRETS/resend_api_key
+[ -n "${NEBULA_BACKUP_B2_KEY_ID:-}" ] && (umask 077; printf '%s' "$NEBULA_BACKUP_B2_KEY_ID" > $SECRETS/b2_key_id)
+[ -n "${NEBULA_BACKUP_B2_APPLICATION_KEY:-}" ] && (umask 077; printf '%s' "$NEBULA_BACKUP_B2_APPLICATION_KEY" > $SECRETS/b2_application_key)
 ok "$ETC/compose.env"
 
 # --- Images ------------------------------------------------------------------
@@ -756,13 +778,25 @@ fi
 
 step "Backups"
 NEW_BACKUP_KEY=""
-if [ ! -f $ETC/backup-key.txt ]; then
-  (umask 077; age-keygen -o $ETC/backup-key.txt 2>/dev/null)
-  NEW_BACKUP_KEY=1
-fi
-if [ ! -f $ETC/backup.env ] || ! grep -q '^NEBULA_BACKUP_AGE_RECIPIENT=' $ETC/backup.env; then
-  printf 'NEBULA_BACKUP_AGE_RECIPIENT=%s\n' "$(age-keygen -y $ETC/backup-key.txt)" >> $ETC/backup.env
+if ! grep -qs '^NEBULA_BACKUP_AGE_RECIPIENT=' $ETC/backup.env; then
+  if [ -f $ETC/backup-key.txt ]; then
+    NEW_BACKUP_KEY=$ETC/backup-key.txt
+  else
+    # A new path: age-keygen will not write into an existing file.
+    NEW_BACKUP_KEY=$(mktemp -d)/backup-key.txt
+    (umask 077; age-keygen -o "$NEW_BACKUP_KEY" 2>/dev/null)
+  fi
+  printf 'NEBULA_BACKUP_AGE_RECIPIENT=%s\n' "$(age-keygen -y "$NEW_BACKUP_KEY")" >> $ETC/backup.env
   chmod 0640 $ETC/backup.env
+fi
+backupset() { sed -i "/^$1=/d" $ETC/backup.env; printf '%s=%s\n' "$1" "$2" >> $ETC/backup.env; }
+if [ "${NEBULA_BACKUP_OFFSITE:-local}" = b2 ]; then
+  command -v aws >/dev/null || apt-get -qq install -y awscli >/dev/null 2>&1 || {
+    python3 -m venv /opt/nebula-awscli && /opt/nebula-awscli/bin/pip install -q awscli       && ln -sf /opt/nebula-awscli/bin/aws /usr/local/bin/aws; } || warn "could not install the AWS CLI; uploads will fail until it is"
+  backupset NEBULA_BACKUP_B2_BUCKET "$NEBULA_BACKUP_B2_BUCKET"
+  backupset NEBULA_BACKUP_B2_ENDPOINT "$NEBULA_BACKUP_B2_ENDPOINT"
+  backupset NEBULA_BACKUP_B2_KEY_ID_FILE $SECRETS/b2_key_id
+  backupset NEBULA_BACKUP_B2_APPLICATION_KEY_FILE $SECRETS/b2_application_key
 fi
 for unit in nebula-backup.service nebula-backup.timer; do
   sed "s#/opt/nebula#$REPO#g" "$REPO/infrastructure/systemd/$unit" > /etc/systemd/system/$unit
@@ -814,18 +848,31 @@ echo "  To update later:  git pull && sudo ./install.sh"
 echo "  To rebuild after losing this server:  sudo ./install.sh --restore <backup file>"
 [ -n "$RESTORE_DIR" ] && rm -rf "$RESTORE_DIR"
 
-if [ -n "$NEW_BACKUP_KEY" ] && [ -t 0 ]; then
+LEFT_KEY=${NEW_BACKUP_KEY:-}
+[ -z "$LEFT_KEY" ] && [ -f $ETC/backup-key.txt ] && LEFT_KEY=$ETC/backup-key.txt
+if [ -n "$LEFT_KEY" ] && [ -t 0 ]; then
   cat <<EOF
 
 ${yellow}${bold}One thing only you can do: save the backup key.${reset}
-Backups are encrypted with it. Keep a copy somewhere other than this server
-(a password manager is ideal). If this server is lost, the key is the only way
-to open its backups.
+Backups are encrypted with it, and it is the only way to open them. Keep it in
+two places other than this server (a password manager and a printout).
 
-  $(grep '^AGE-SECRET-KEY' $ETC/backup-key.txt)
+  $(grep '^AGE-SECRET-KEY' "$LEFT_KEY")
 
-Copy the backups off the server too (they are in /var/backups/nebula), or set
-up Backblaze B2 uploads: infrastructure/backup/README.md.
+It is then deleted from this server: a copy here would open every backup to
+whoever takes the server.
 EOF
-  read -rp "Press Enter once the key is saved: " _
+  read -rp "Type 'saved' once it is stored elsewhere: " saved
+  if [ "$saved" = saved ]; then
+    shred -u "$LEFT_KEY" 2>/dev/null || rm -f "$LEFT_KEY"
+    ok "backup key deleted from this server"
+  else
+    [ "$LEFT_KEY" = $ETC/backup-key.txt ] || install -m 0600 "$LEFT_KEY" $ETC/backup-key.txt
+    [ "$LEFT_KEY" = $ETC/backup-key.txt ] || rm -f "$LEFT_KEY"
+    warn "the backup key stays in $ETC/backup-key.txt; rerun ./install.sh to save and delete it"
+  fi
+elif [ -n "${NEW_BACKUP_KEY:-}" ] && [ "$NEW_BACKUP_KEY" != $ETC/backup-key.txt ]; then
+  # No terminal to show it on: kept, so it is not lost, until a rerun.
+  install -m 0600 "$NEW_BACKUP_KEY" $ETC/backup-key.txt; rm -f "$NEW_BACKUP_KEY"
+  warn "the backup key is in $ETC/backup-key.txt; copy it off this server, then rerun ./install.sh to delete it"
 fi

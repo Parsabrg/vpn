@@ -1,13 +1,18 @@
 # Off-host encrypted backups
 
-> **`install.sh` sets this up:** an `age` key in `/etc/nebula/backup-key.txt`,
-> the daily timer, and encrypted copies kept 14 days in `/var/backups/nebula`.
-> Uploading to Backblaze B2 is optional: add the `NEBULA_BACKUP_B2_*` lines of
-> step 5 to `/etc/nebula/backup.env`. Each backup holds the database, the
-> secrets, the `nebula-state` volume and `/etc/nebula`'s configuration, and
-> `sudo ./install.sh --restore <file>` rebuilds a server from one (tested
-> 2026-10-26: a wiped server came back with the same identity, keys and data).
+**`install.sh` does this since 2026-10-30.** It asks where backups also go
+(Backblaze B2, or "this server only" with a warning) and installs the AWS CLI
+for B2. It shows a new backup key once and deletes it from the server after
+you confirm it is saved; encrypting needs only the public half in
+`/etc/nebula/backup.env`. `--restore` uses the key you type and never stores
+it. The manual steps below are for installs from before then.
 
+> **`install.sh` sets this up:** the daily timer, encrypted copies kept 14 days
+> in `/var/backups/nebula`, and the B2 upload when chosen (above). Each backup
+> holds the database, the secrets, the `nebula-state` volume and
+> `/etc/nebula`'s configuration, and `sudo ./install.sh --restore <file>`
+> rebuilds a server from one (tested 2026-10-26: a wiped server came back with
+> the same identity, keys and data).
 
 Daily backup of the Postgres database and `/etc/nebula/secrets`
 (everything needed to reconstitute this deployment from nothing), archived,
