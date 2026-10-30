@@ -82,21 +82,41 @@ updates:
     directories: ["/", "/infrastructure/compose"]
     schedule:
       interval: weekly
+    ignore:
+      # A Postgres major needs a data migration (pg_upgrade or a dump and
+      # restore), not an image bump.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /services/api
     schedule:
       interval: weekly
+    ignore:
+      # Python 3.15 broke the image build and smoke test (2026-10-30);
+      # upgrade on purpose once the services are tested on it.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /services/vpn-agent
     schedule:
       interval: weekly
+    ignore:
+      # Python 3.15 broke the image build and smoke test (2026-10-30);
+      # upgrade on purpose once the services are tested on it.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /services/worker
     schedule:
       interval: weekly
+    ignore:
+      # Python 3.15 broke the image build and smoke test (2026-10-30);
+      # upgrade on purpose once the services are tested on it.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: docker
     directory: /apps/admin
