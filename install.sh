@@ -580,7 +580,11 @@ step "VPN agent"
 if [ ! -x /opt/nebula-vpn-agent/.venv/bin/nebula-agent-serve ]; then
   python3 -m venv /opt/nebula-vpn-agent/.venv
 fi
-HTTPS_PROXY=${NEBULA_INSTALL_PROXY:-} /opt/nebula-vpn-agent/.venv/bin/pip install -q "$REPO/services/vpn-agent" \
+# Dependencies only as pinned and hashed in requirements.lock; the agent
+# itself is built from the checkout with the build backend from that lock.
+{ HTTPS_PROXY=${NEBULA_INSTALL_PROXY:-} /opt/nebula-vpn-agent/.venv/bin/pip install -q --require-hashes \
+    -r "$REPO/services/vpn-agent/requirements.lock" \
+  && /opt/nebula-vpn-agent/.venv/bin/pip install -q --no-deps --no-build-isolation "$REPO/services/vpn-agent"; } \
   >/tmp/nebula-agent-pip.log 2>&1 || { tail -n 20 /tmp/nebula-agent-pip.log; die "installing the agent failed"; }
 if [ ! -f $ETC/agent.env ]; then
   umask 027

@@ -30,6 +30,11 @@ remain future phases.
 The root `.tool-versions`, `.python-version`, and `.nvmrc` files are the source of
 truth for developer and CI tool versions. Direct application dependencies are
 exactly pinned; the admin dependency graph is committed in `package-lock.json`.
+Each Python service's full dependency set, with hashes and the build backend, is
+in its `requirements.lock`, made by `make locks` from `pyproject.toml`; the
+images and `install.sh` install only from it (`--require-hashes`), and CI fails
+when a lock no longer matches. After changing a dependency (Dependabot's bumps
+included), run `make locks` and commit the result.
 
 ## Bootstrap
 

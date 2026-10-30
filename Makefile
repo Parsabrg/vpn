@@ -1,9 +1,10 @@
 .DEFAULT_GOAL := help
 
-.PHONY: help bootstrap check test db-upgrade db-check compose-config compose-up compose-down compose-smoke
+.PHONY: help bootstrap locks check test db-upgrade db-check compose-config compose-up compose-down compose-smoke
 
 help:
 	@echo "bootstrap      Install workspace dependencies"
+	@echo "locks          Regenerate the hashed services/*/requirements.lock"
 	@echo "check          Run all static checks and tests"
 	@echo "db-upgrade     Upgrade PostgreSQL to the checked-in migration head"
 	@echo "db-check       Verify model metadata matches the migration head"
@@ -16,6 +17,10 @@ bootstrap:
 	python -m pip install -e "./services/api[dev]" -e "./services/vpn-agent[dev]"
 	npm --prefix apps/admin ci
 	cd apps/mobile && flutter pub get
+
+# Keeps the pins already in each lock; add --upgrade to move indirect ones.
+locks:
+	for s in api vpn-agent worker; do (cd services/$$s && uv pip compile -q pyproject.toml --group build --universal --generate-hashes --python-version 3.12 --custom-compile-command "make locks" -o requirements.lock) || exit 1; done
 
 check:
 	python -m pip_audit

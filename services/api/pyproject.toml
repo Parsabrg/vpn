@@ -28,6 +28,10 @@ dependencies = [
 [project.scripts]
 nebula-api = "nebula_api.cli:main"
 
+# The build backend, so requirements.lock pins it with hashes too.
+[dependency-groups]
+build = ["hatchling==1.32.4"]
+
 [project.optional-dependencies]
 dev = [
   "hypothesis==6.170.12",
