@@ -1,7 +1,8 @@
 # Changelog
 
 Releases of the apps are on the [releases page](https://github.com/Parsabrg/vpn/releases),
-each with its full notes. Server-side changes take effect when a server is
+each with its full notes. A server updates to the same tags:
+`sudo ./install.sh --update`. Server-side changes take effect when a server is
 updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 
 ## Unreleased
@@ -10,6 +11,8 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- `sudo ./install.sh --update` moves a server to the newest release tag, never
+  backwards, and shows what changed.
 - Login and password-reset limits fit many users behind one shared address (#21).
 - Fresh installs: WireGuard clients reach the internet (#22); paths, gRPC name and
   Hysteria2 decoy differ per install (#24); fail2ban, automatic security updates
