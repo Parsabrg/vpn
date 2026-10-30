@@ -1,0 +1,27 @@
+name: Bug report
+description: Something does not work as it should.
+body:
+  - type: markdown
+    attributes:
+      value: Do not include server addresses, account details, keys or logs that show them.
+  - type: input
+    id: version
+    attributes:
+      label: App or server version
+      placeholder: 0.1.33, Android
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+  - type: input
+    id: network
+    attributes:
+      label: Network (country, home line or mobile operator), if it is about connecting

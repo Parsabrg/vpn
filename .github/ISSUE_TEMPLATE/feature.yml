@@ -1,0 +1,9 @@
+name: Feature request
+description: Something Nebula should do.
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you need, and why
+    validations:
+      required: true

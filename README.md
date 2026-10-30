@@ -76,6 +76,9 @@ docs/             Architecture, threat model, ADRs, runbooks, roadmap
 
 ## Documents
 
+[CHANGELOG.md](CHANGELOG.md) lists changes; [CONTRIBUTING.md](CONTRIBUTING.md) says how to send one;
+[SECURITY.md](SECURITY.md) says how to report a vulnerability privately.
+
 Pull requests written as "archive #N" are in the private development history
 this repository was published from; plain "#N" is a pull request here.
 
