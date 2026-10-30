@@ -57,6 +57,9 @@ jobs:
           set -eu
           ip=$(curl -4 -fsS -m 10 https://www.cloudflare.com/cdn-cgi/trace | sed -n 's/^ip=//p')
           d=$NEBULA_DOMAIN
+          # The runner's public address belongs to Azure's NAT; a server owns
+          # its own. On loopback, connections to it stay on this machine.
+          sudo ip address add "$ip/32" dev lo
           echo "$ip $d panel.$d api.$d" | sudo tee -a /etc/hosts
           a=/etc/letsencrypt/archive/panel.$d l=/etc/letsencrypt/live/panel.$d
           sudo mkdir -p "$a" "$l"
