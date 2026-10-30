@@ -472,7 +472,7 @@ if [ ! -f $CERT/fullchain.pem ]; then
   # a server block whose certificate file is missing.
   awk '/^server \{/{n++} n<=1' /etc/nginx/sites-available/nebula > /etc/nginx/sites-available/nebula-acme
   ln -sf /etc/nginx/sites-available/nebula-acme /etc/nginx/sites-enabled/nebula
-  nginx -t >/dev/null 2>&1 && systemctl reload nginx
+  nginx -t >/dev/null 2>&1 && systemctl reload-or-restart nginx
   domains=(); for h in "${NAMES[@]}"; do domains+=(-d "$h"); done
   certbot certonly --webroot -w /var/www/nebula-acme --cert-name "$CERTNAME" "${domains[@]}" \
     --email "$NEBULA_ADMIN_EMAIL" --agree-tos --no-eff-email --non-interactive -q \
@@ -487,7 +487,7 @@ sed -e "s/vpn.example.com/$NEBULA_DOMAIN/g" -e "s#live/$NEBULA_DOMAIN/#live/$CER
   -e "s#location /xhttp {#location $XHTTP_PATH {#" -e "s#location /ws {#location $WS_PATH {#" -e "s#location /grpc/ {#location /$GRPC_NAME/ {#" \
   "$REPO/infrastructure/nginx/xray-8445.conf" > /etc/nginx/conf.d/xray-8445.conf
 nginx -t >/dev/null 2>&1 || { nginx -t; die "nginx rejected the configuration"; }
-systemctl reload nginx
+systemctl enable -q nginx; systemctl reload-or-restart nginx
 ok "certificate for ${NAMES[*]}"
 
 # --- VPN engines and agent ----------------------------------------------------
@@ -507,7 +507,7 @@ if [ "$(/usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print $2}')" != "$X
   echo "${XRAY_SHA[$ARCH]}  /tmp/xray.zip" | sha256sum -c --quiet || die "Xray download failed its checksum"
   rm -rf /tmp/xray-new; unzip -oq /tmp/xray.zip xray -d /tmp/xray-new
   install -m 0755 /tmp/xray-new/xray /usr/local/bin/xray
-  systemctl try-restart nebula-xray
+  ! systemctl is-active -q nebula-xray || systemctl restart nebula-xray
 fi
 if [ ! -x /usr/local/bin/hysteria ]; then
   fetch -o /tmp/hysteria "https://github.com/apernet/hysteria/releases/download/app/v$HYSTERIA_VERSION/hysteria-linux-$ARCH"
@@ -539,7 +539,12 @@ ok "Xray $(/usr/local/bin/xray version | awk 'NR==1{print $2}'), Hysteria2, Wire
 step "Firewall"
 # awk reads to the end: one that exits early SIGPIPEs sshd, and pipefail
 # then ends the whole install (seen 2026-10-26, exit 141).
-SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{p=$2} END{print p}'); SSH_PORT=${SSH_PORT:-22}
+# sshd -T can fail (exit 255 with no /run/sshd, e.g. socket-activated ssh);
+# then the Port lines of its config decide, so a custom port stays open.
+SSH_PORT=$(sshd -T 2>/dev/null | awk '/^port /{p=$2} END{print p}' || true)
+[ -n "$SSH_PORT" ] || SSH_PORT=$(cat /etc/ssh/sshd_config /etc/ssh/sshd_config.d/*.conf 2>/dev/null \
+  | awk 'tolower($1)=="port"{p=$2} END{print p}' || true)
+SSH_PORT=${SSH_PORT:-22}
 ufw allow "$SSH_PORT/tcp" comment ssh >/dev/null
 for p in 80/tcp 8445/tcp 8447/tcp 8448/tcp 8449/tcp 8450/udp 51820/udp; do ufw allow $p comment nebula >/dev/null; done
 if [ -n "$JOIN_URL" ]; then
@@ -727,7 +732,7 @@ for p in "${OPEN_PORTS[@]}"; do
     ufw allow "$one" comment nebula >/dev/null
   done
 done
-[ -n "$CONFIGURE" ] && { nginx -t >/dev/null 2>&1 && systemctl reload nginx; ufw reload >/dev/null; }
+[ -n "$CONFIGURE" ] && { nginx -t >/dev/null 2>&1 && systemctl reload-or-restart nginx; ufw reload >/dev/null; }
 systemctl enable nebula-vpn-agent >/dev/null 2>&1; systemctl restart nebula-vpn-agent
 for _ in $(seq 1 30); do [ -f /etc/nebula/xray/config.json ] && break; sleep 1; done
 systemctl enable --now nebula-xray nebula-hysteria >/dev/null 2>&1
