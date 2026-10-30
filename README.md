@@ -6,8 +6,9 @@ Android, Windows and Linux connect to it with whichever protocol the network
 lets through, and keep working when the server's own address is blocked.
 
 Releases are on the [releases page](https://github.com/Parsabrg/vpn/releases).
-[`docs/ROADMAP.md`](docs/ROADMAP.md) is the target, and its status table the
-record of what is done and how it was tested.
+[`docs/ROADMAP.md`](docs/ROADMAP.md) says what comes next, and its status table is the
+record of what is done and how it was tested; the full target is in
+[`docs/roadmap-sections.md`](docs/roadmap-sections.md).
 
 ## What it does
 
