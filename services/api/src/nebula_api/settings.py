@@ -205,6 +205,10 @@ class Settings(BaseSettings):
 
     auth_rate_window_seconds: int = Field(default=900, ge=60, le=3_600)
     user_login_rate_limit: int = Field(default=10, ge=1, le=100)
+    # Per /24 for sign-in and password reset, apart from the per-account
+    # limit above: everyone on one mobile carrier's NAT, or connected through
+    # one VPN server (the app's API calls use the tunnel), shares a network.
+    user_network_rate_limit: int = Field(default=100, ge=1, le=10_000)
     admin_login_rate_limit: int = Field(default=5, ge=1, le=50)
     admin_mfa_rate_limit: int = Field(default=5, ge=1, le=50)
     password_reset_rate_limit: int = Field(default=5, ge=1, le=50)

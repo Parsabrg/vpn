@@ -52,8 +52,8 @@ it is never accepted as an environment variable or command-line argument.
 
 ## Authentication key material
 
-| Variable                                  | Format                            | Purpose                                 |
-| ------------------------------------------ | ---------------------------------- | ------------------------------------------ |
+| Variable                                  | Format                           | Purpose                                |
+| ----------------------------------------- | -------------------------------- | -------------------------------------- |
 | `NEBULA_JWT_PRIVATE_KEY_FILE`             | Ed25519 private key in PEM       | Sign user access tokens                |
 | `NEBULA_JWT_PUBLIC_KEY_FILE`              | Matching Ed25519 public PEM      | Verify user access tokens              |
 | `NEBULA_JWT_PREVIOUS_PUBLIC_KEYS_DIR`     | Directory of Ed25519 public PEMs | Retired verification keys (optional)   |
@@ -119,7 +119,7 @@ too early can suddenly invalidate something still in use.
   `NEBULA_XRAY_KEY_VERSION` with the old key moved into
   `NEBULA_XRAY_PREVIOUS_ENCRYPTION_KEYS_DIR` under its old version, and restart. Only delete
   a retired key once `select key_version, count(*) from device_protocol_credentials where
-  ciphertext is not null group by key_version` shows nothing left under it. Losing it is
+ciphertext is not null group by key_version` shows nothing left under it. Losing it is
   worse than losing the MFA key's predecessor: an undecryptable credential can be neither
   served nor cleanly revoked, so the device has to be re-provisioned. This is the rotation
   that has already gone wrong once here; the runbook opens with what happened.
@@ -140,15 +140,16 @@ too early can suddenly invalidate something still in use.
 
 ## Authentication abuse controls
 
-| Variable                           | Default | Scope                                     |
-| ---------------------------------- | ------: | ----------------------------------------- |
-| `NEBULA_AUTH_RATE_WINDOW_SECONDS`  |     900 | Atomic Redis limiter window               |
-| `NEBULA_USER_LOGIN_RATE_LIMIT`     |      10 | Keyed user plus coarse network prefix     |
-| `NEBULA_ADMIN_LOGIN_RATE_LIMIT`    |       5 | Keyed admin plus coarse network prefix    |
-| `NEBULA_ADMIN_MFA_RATE_LIMIT`      |       5 | Challenge plus coarse network prefix      |
-| `NEBULA_PASSWORD_RESET_RATE_LIMIT` |       5 | Reset request/confirm plus network prefix |
-| `NEBULA_ADMIN_LOCKOUT_THRESHOLD`   |       5 | Password or MFA failures before lockout   |
-| `NEBULA_ADMIN_LOCKOUT_SECONDS`     |     900 | Lockout duration                          |
+| Variable                           | Default | Scope                                                        |
+| ---------------------------------- | ------: | ------------------------------------------------------------ |
+| `NEBULA_AUTH_RATE_WINDOW_SECONDS`  |     900 | Atomic Redis limiter window                                  |
+| `NEBULA_USER_LOGIN_RATE_LIMIT`     |      10 | Per account for sign-in; per token for refresh               |
+| `NEBULA_USER_NETWORK_RATE_LIMIT`   |     100 | Per /24, sign-in and password reset (carrier NAT, VPN exits) |
+| `NEBULA_ADMIN_LOGIN_RATE_LIMIT`    |       5 | Keyed admin plus coarse network prefix                       |
+| `NEBULA_ADMIN_MFA_RATE_LIMIT`      |       5 | Challenge plus coarse network prefix                         |
+| `NEBULA_PASSWORD_RESET_RATE_LIMIT` |       5 | Per account (request) or token (confirm)                     |
+| `NEBULA_ADMIN_LOCKOUT_THRESHOLD`   |       5 | Password or MFA failures before lockout                      |
+| `NEBULA_ADMIN_LOCKOUT_SECONDS`     |     900 | Lockout duration                                             |
 
 Forwarding headers are ignored for these controls; the socket peer is reduced to a
 coarse `/24` IPv4 or `/64` IPv6 prefix. A later trusted-proxy deployment must make
