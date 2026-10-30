@@ -85,6 +85,24 @@ remember() {
 }
 
 compose() { docker compose -p "$PROJECT" --env-file "$ETC/compose.env" -f "$COMPOSE_FILE" "$@"; }
+
+# Adds WireGuard's NAT and client restrictions to a ufw before.rules file,
+# once (marked), leaving everything else in it as it was. $1 is the outgoing
+# interface, $2 the file.
+WG_POOL=10.77.0.0/24
+WG_BLOCKED="0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 127.0.0.0/8 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.168.0.0/16 198.18.0.0/15 224.0.0.0/4 240.0.0.0/4"
+wireguard_routing() {
+  local wan=$1 file=$2 nat forward n
+  grep -q 'nebula-wireguard' "$file" && return 0
+  nat="# nebula-wireguard: clients' traffic leaves as this host\n*nat\n:POSTROUTING ACCEPT [0:0]\n-A POSTROUTING -s $WG_POOL -o $wan -j MASQUERADE\nCOMMIT\n"
+  forward="# nebula-wireguard: not each other, not this host's networks\n-A ufw-before-forward -i wg0 -o wg0 -j REJECT\n"
+  for n in $WG_BLOCKED; do forward+="-A ufw-before-forward -i wg0 -d $n -j REJECT\n"; done
+  forward+="-A ufw-before-input -i wg0 -j REJECT\n"
+  awk -v nat="$nat" -v fwd="$forward" '
+    NR == 1 { printf "%s", nat }
+    /^-A ufw-before-input -i lo -j ACCEPT/ && !done { printf "%s", fwd; done = 1 }
+    { print }' "$file" > "$file.nebula" && cat "$file.nebula" > "$file" && rm -f "$file.nebula"
+}
 api() { compose exec -T api nebula-api "$@"; }
 
 # Downloads that fail from some networks (PyPI's file host and GitHub are slow
@@ -479,6 +497,18 @@ if ! grep -q 'uid-owner nebula-xray' /etc/ufw/before.rules; then
     rules+="-A ufw6-before-output -m owner --uid-owner nebula-xray -m conntrack --ctstate NEW -d $n -j REJECT\n"; done
   awk -v r="$rules" '/^-A ufw6-before-output -o lo -j ACCEPT/{printf "%s", r} {print}' /etc/ufw/before6.rules > /tmp/ufw-before6 && cat /tmp/ufw-before6 > /etc/ufw/before6.rules
 fi
+# WireGuard clients reach the internet: forwarding, NAT on the outgoing
+# interface and a ufw route. Without them a fresh server's WireGuard carried
+# nothing (the first server was fixed by hand). Clients may not reach this
+# host, private and Docker networks, the metadata service or each other --
+# the same list the agent gives Xray and Hysteria2 (drivers/egress.py).
+WAN=$(ip -4 route show default | awk '{for (i = 1; i < NF; i++) if ($i == "dev") d = $(i + 1)} END {print d}')
+[ -n "$WAN" ] || die "no default route: cannot tell which interface WireGuard clients leave by"
+wireguard_routing "$WAN" /etc/ufw/before.rules
+printf 'net.ipv4.ip_forward=1\n' > /etc/sysctl.d/99-nebula-forward.conf
+sysctl -q -p /etc/sysctl.d/99-nebula-forward.conf
+sed -i 's|^#\?net/ipv4/ip_forward=.*|net/ipv4/ip_forward=1|' /etc/ufw/sysctl.conf
+ufw route allow in on wg0 out on "$WAN" comment nebula-wireguard >/dev/null
 ufw --force enable >/dev/null; ufw reload >/dev/null
 if [ -n "$JOIN_URL" ]; then opened="9443 from $CONTROL_IP"; else opened="8444"; fi
 ok "open: ssh ($SSH_PORT), 80, $opened, 8445, 8447-8449, 8450/udp, 51820/udp"
