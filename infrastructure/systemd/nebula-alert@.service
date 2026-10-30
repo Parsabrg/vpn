@@ -1,0 +1,45 @@
+# Sends one alert about the unit named in the instance, and is wired in by
+# putting this on the unit you want reported:
+#
+#     OnFailure=nebula-alert@%n.service
+#
+# %n expands to the failing unit's full name, so one template covers every
+# unit rather than each needing its own handler.
+#
+# This catches a unit that enters `failed`. It does NOT catch the two faults
+# that have actually happened here -- a crash loop never reaches `failed`
+# because the start-rate limit is deliberately huge, and a timer that stops
+# firing produces no event at all. nebula-healthcheck.timer covers those, and
+# the two are complementary rather than redundant.
+
+[Unit]
+Description=Report that %i failed
+# Not After=network-online.target: this runs after something already went
+# wrong, and waiting on a target that may itself be the problem would mean the
+# alert about a network fault is the one that never sends.
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nebula/agent.env
+ExecStart=/opt/nebula-vpn-agent/.venv/bin/nebula-agent-alert %i
+
+# Deliberately thin compared with nebula-vpn-agent.service: this needs to read
+# one secret and reach one HTTPS endpoint, nothing else.
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+ReadOnlyPaths=/etc/nebula/secrets
+UMask=0077

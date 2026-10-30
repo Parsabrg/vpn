@@ -1,0 +1,27 @@
+[Unit]
+Description=Check from inside Iran whether the transports are reachable
+
+[Timer]
+# Hourly, not every 20 minutes like the health check. Three reasons, and the
+# first is the one that matters:
+#
+# Blocking is a slow-moving fact. A transport that is filtered stays filtered
+# for hours or days, so measuring it three times an hour learns nothing the
+# first measurement did not and only adds chances for a noisy traceroute to
+# produce a false verdict.
+#
+# It also depends on a third party. Globalping's free tier is generous but
+# finite, and there are only five probes in Iran -- being a heavy anonymous
+# user of a service other people rely on to study censorship is not the right
+# trade for data this check does not need.
+#
+# And it is slow: two measurements per TCP transport, each dispatched to
+# probes and polled, so a run takes minutes rather than seconds.
+OnCalendar=hourly
+RandomizedDelaySec=600
+# A host that was off does not need to catch up on censorship measurements
+# from yesterday; the next hourly run answers the same question.
+Persistent=false
+
+[Install]
+WantedBy=timers.target

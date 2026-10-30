@@ -1,0 +1,11 @@
+# Where the copy lives and what is generated from it.
+#
+# `arb-dir` is the only place user-facing strings are written. English is the
+# template: a key that exists in it and not in another locale falls back to
+# English rather than rendering blank, which is the behaviour that matters on
+# a screen somebody is relying on.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppText
+nullable-getter: false

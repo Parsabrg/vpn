@@ -1,0 +1,99 @@
+name: Flutter
+
+on:
+  pull_request:
+    paths: ["apps/mobile/**", ".github/workflows/flutter.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/mobile/**", ".github/workflows/flutter.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: flutter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patched-plugin:
+    # GitHub-hosted: the repository is public, so these are free, and no job
+    # ever runs on the project's own servers.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: The tunnel plugin still resolves to the patched copy
+        working-directory: apps/mobile
+        run: |
+          set -eu
+          block=$(awk '/^  flutter_v2ray_client:$/ {inside=1; print; next} inside && /^  [^ ]/ {exit} inside {print}' pubspec.lock)
+          if [ -z "$block" ]; then
+            echo "::error file=apps/mobile/pubspec.lock::flutter_v2ray_client is missing from pubspec.lock"
+            exit 1
+          fi
+          echo "$block"
+          if ! echo "$block" | grep -q 'source: path' ||
+             ! echo "$block" | grep -q 'path: "third_party/flutter_v2ray_client"'; then
+            echo "::error file=apps/mobile/pubspec.lock::flutter_v2ray_client no longer resolves to third_party/flutter_v2ray_client. The tunnel runs on that patched copy; the pub.dev release lacks the patches and the native Hysteria2 binaries. Run third_party_src/vendor_plugin.py and regenerate the lock."
+            exit 1
+          fi
+          echo "flutter_v2ray_client resolves to the patched copy"
+
+  checks:
+    # Deliberately not the self-hosted runner. The container below
+    # carries the Android SDK and a JDK and unpacks to more than the
+    # VPS has free, and a full disk on that host is a production
+    # outage rather than a failed build.
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:3.44.0@sha256:46691e311715845de03a3ba4753a475476936805b29431b1f00f1816981033f8
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # `third_party/` is generated and gitignored, and pubspec_overrides.yaml
+      # points at it, so `flutter pub get` cannot resolve until it exists --
+      # which is why every run of this workflow failed at the first step and
+      # this project had no Flutter signal at all. Local builds run the same
+      # script by hand (third_party_src/README.md).
+      #
+      # The two commands are ordered, not interchangeable: the script patches
+      # a copy of the plugin taken from the pub cache, and the cache is empty
+      # until something puts it there. `pub get` cannot, because of the
+      # override, so `pub cache add` does it directly.
+      - name: Vendor the patched flutter_v2ray_client
+        working-directory: apps/mobile
+        run: |
+          flutter pub cache add flutter_v2ray_client --version 3.4.1
+          python3 third_party_src/vendor_plugin.py
+      - name: Resolve dependencies
+        working-directory: apps/mobile
+        run: flutter pub get
+      # lib and test, not `.`: third_party/ is a copy of an upstream release
+      # and its formatting is not ours to fix. analysis_options.yaml already
+      # excludes it from the analyzer, but dart format does not read that file.
+      - name: Format
+        working-directory: apps/mobile
+        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Analyze
+        working-directory: apps/mobile
+        run: flutter analyze --fatal-infos
+      - name: Test
+        working-directory: apps/mobile
+        run: flutter test
+      # Tests pass without ever assembling the Android side, so nothing here
+      # proved a published APK could be rebuilt from the tag it claims -- the
+      # patched plugin, its native Hysteria2 binaries and the manifest were
+      # only ever exercised on a laptop. Debug rather than release: signing
+      # uses the project's release key, which is deliberately not in CI. This
+      # proves the artifact assembles; it does not reproduce the signature.
+      #
+      # One ABI, not all four. A debug build of every ABI carries four copies
+      # of the Hysteria2 binary plus their debug symbols and fills the runner's
+      # disk ("No space left on device" in stripDebugDebugSymbols). arm64 is
+      # what real devices use, and the other three binaries are already pinned
+      # and verified by sha256 in the vendoring script, so what this step adds
+      # -- proof that the plugin, its native libraries and the manifest
+      # actually assemble -- is not weakened by building one of them.
+      - name: Build APK
+        working-directory: apps/mobile
+        run: flutter build apk --debug --target-platform android-arm64

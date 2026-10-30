@@ -1,0 +1,27 @@
+[Unit]
+Description=Periodic Nebula VPN reconciliation sweep
+
+[Timer]
+# Every 15 minutes rather than daily: the states this recovers (a row stuck
+# APPLYING or REVOKING after a crash) are user-visible while they last -- a
+# stuck client can neither be used nor cleanly re-provisioned -- so a daily
+# cadence would leave someone broken for most of a day. The sweep is bounded
+# by reconciliation_batch_size and only touches rows in a non-terminal state,
+# so an idle deployment costs one cheap query per pass.
+#
+# This interval is also a security bound, which it was not when it was chosen.
+# Revoking a device marks its VPN credentials REVOKING and hands them to this
+# sweep to remove from the server, so with the RandomizedDelaySec below, a
+# revoked device loses its tunnel within about 17 minutes. Lengthening this
+# lengthens that window -- see _revoke_device_credentials in
+# services/api/src/nebula_api/user_management/service.py.
+OnCalendar=*:0/15
+# Spreads load off the exact quarter-hour, and keeps the two ExecStart passes
+# from lining up with the backup timer's own window.
+RandomizedDelaySec=120
+# A host that was powered off through a firing runs it once on boot instead
+# of silently skipping that window.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

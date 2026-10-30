@@ -1,0 +1,564 @@
+# Production Docker Compose stack: postgres, redis, and the containerized
+# application services (api, worker, admin). Standalone, not an overlay on
+# the repo-root compose.yaml -- too much differs from that dev/CI stack (no
+# mailpit, no fake vpn-agent container, every secret is required rather than
+# defaulted). The VPN agent itself is NOT here: per docs/architecture.md it
+# runs as a bare-metal systemd service on the VPN host for its CAP_NET_ADMIN
+# requirement -- see services/vpn-agent/deploy/. See README.md in this
+# directory for the full deployment procedure and required environment
+# variables.
+#
+# Usage:
+#   docker compose -f infrastructure/compose/production.yaml \
+#     --env-file /etc/nebula/compose.env config --quiet   # validate
+#   docker compose -f infrastructure/compose/production.yaml \
+#     --env-file /etc/nebula/compose.env run --rm migrate # manual migration step
+#   docker compose -f infrastructure/compose/production.yaml \
+#     --env-file /etc/nebula/compose.env up -d --wait     # what the systemd unit runs
+
+name: nebula-production
+
+# Docker's default is the json-file driver with no size limit and no
+# rotation, so a container's log grows until the disk is gone. That is not a
+# theoretical worry on this host: 38 GB shared with the database and the CI
+# runner, and it has run out before. The
+# `usage` service alone writes a line every fifteen seconds.
+#
+# Set here rather than in /etc/docker/daemon.json deliberately. A daemon
+# default would need `systemctl restart docker` -- which restarts every
+# container, including the database -- and would live in a file nothing in
+# this repository tracks. This applies to each service on its next recreate,
+# which a deploy does anyway.
+#
+# 10 MB x 3 caps each container at 30 MB, roughly a fortnight for the
+# chattiest of them, which is longer than any of these logs stay useful:
+# what matters beyond that is in the database or the journal.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:17.11
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:?POSTGRES_SUPERUSER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?POSTGRES_SUPERUSER_PASSWORD must be set}
+      NEBULA_DB_APP_USER: ${NEBULA_DB_APP_USER:?NEBULA_DB_APP_USER must be set}
+      NEBULA_DB_APP_PASSWORD: ${NEBULA_DB_APP_PASSWORD:?NEBULA_DB_APP_PASSWORD must be set}
+      NEBULA_DB_MIGRATOR_USER: ${NEBULA_DB_MIGRATOR_USER:?NEBULA_DB_MIGRATOR_USER must be set}
+      NEBULA_DB_MIGRATOR_PASSWORD: ${NEBULA_DB_MIGRATOR_PASSWORD:?NEBULA_DB_MIGRATOR_PASSWORD must be set}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ../postgres/001-create-roles.sh:/docker-entrypoint-initdb.d/001-create-roles.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+    networks: [backend]
+    logging: *default-logging
+    restart: unless-stopped
+
+  redis:
+    image: redis:8.10.2-alpine3.23
+    command:
+      [
+        "redis-server",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "everysec",
+        "--requirepass",
+        "${NEBULA_REDIS_PASSWORD:?NEBULA_REDIS_PASSWORD must be set}",
+      ]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${NEBULA_REDIS_PASSWORD:?}", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    networks: [backend]
+    logging: *default-logging
+    restart: unless-stopped
+
+  # One-shot: apply pending migrations. Deliberately NOT in `api`'s
+  # depends_on -- production migrations are a reviewed, manual step run
+  # before starting/restarting api/worker, not an automatic side effect of
+  # `up`. `profiles` keeps it out of a bare `up`/`up --wait` entirely (a
+  # container that exits 0 on success still isn't a state `--wait` accepts,
+  # so a plain `up --wait` would otherwise always report failure even
+  # though every real service came up healthy) -- `run` ignores profiles
+  # for an explicitly named service, so this still works exactly the same:
+  #   docker compose -f production.yaml --env-file ... run --rm migrate
+  migrate:
+    # No longer behind a profile: `docker compose up -d` has to bring a fresh
+    # host all the way to a working deployment, and it cannot do that if the
+    # schema step is one an operator has to know to run. Repeat runs are a
+    # no-op -- alembic exits immediately when the schema is already at head.
+    build:
+      context: ../../services/api
+    # Bypasses the image's entrypoint, which prepares an installation and then
+    # execs its argument. That bootstrap reads tables this service exists to
+    # create, so inheriting it here would be circular.
+    entrypoint: []
+    command: ["alembic", "-c", "/app/alembic.ini", "upgrade", "head"]
+    environment:
+      MIGRATION_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_MIGRATOR_USER:?NEBULA_DB_MIGRATOR_USER must be set}:${NEBULA_DB_MIGRATOR_PASSWORD:?NEBULA_DB_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    networks: [backend]
+    logging: *default-logging
+    restart: "no"
+
+  api:
+    build:
+      context: ../../services/api
+    # Shared with `usage`, which runs this image's CLI and needs every setting
+    # the API does -- Settings() refuses to start without them.
+    environment: &api-environment
+      NEBULA_ENV: production
+      NEBULA_LOG_LEVEL: ${NEBULA_LOG_LEVEL:-INFO}
+      # What the apps call this server ("Server: ..." after pairing). Read by
+      # `nebula-api initialize` on every start, so a change applies at the next.
+      NEBULA_DEPLOYMENT_NAME: ${NEBULA_DEPLOYMENT_NAME:-Nebula}
+      NEBULA_API_PUBLIC_URL: ${NEBULA_API_PUBLIC_URL:?NEBULA_API_PUBLIC_URL must be set}
+      NEBULA_ADMIN_PUBLIC_URL: ${NEBULA_ADMIN_PUBLIC_URL:?NEBULA_ADMIN_PUBLIC_URL must be set}
+      NEBULA_ALLOWED_ORIGINS: ${NEBULA_ALLOWED_ORIGINS:?NEBULA_ALLOWED_ORIGINS must be set}
+      # The Cloudflare-proxied hostname clients fall back to when this
+      # server's own address is blocked. Optional: empty disables the route.
+      # See infrastructure/nginx/README.md, "The Cloudflare backup route".
+      NEBULA_CDN_HOST: ${NEBULA_CDN_HOST:-}
+      # Names on a web host (Vercel, Netlify) that forwards to this server;
+      # XHTTP only. Optional: a web-host front's name, if one is used.
+      NEBULA_FRONT_HOSTS: ${NEBULA_FRONT_HOSTS:-}
+      # Which servers sit behind NEBULA_CDN_HOST, by code; empty means all.
+      # Set it once a second server joins. See settings.py.
+      NEBULA_CDN_SERVERS: ${NEBULA_CDN_SERVERS:-}
+      # Every address this API answers on, in the order to try them. Served to
+      # signed-in clients so an address added later reaches installed apps
+      # without a new build. See services/api/src/nebula_api/api_routes.py.
+      NEBULA_API_ROUTES: ${NEBULA_API_ROUTES:-}
+      # The newest promoted client version, offered to signed-in apps while
+      # the repository's GitHub releases are private. See
+      # services/api/src/nebula_api/client_release.py.
+      NEBULA_CLIENT_LATEST_VERSION: ${NEBULA_CLIENT_LATEST_VERSION:-}
+      NEBULA_XRAY_CLIENT_DNS: ${NEBULA_XRAY_CLIENT_DNS:-}
+      NEBULA_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_APP_USER:?NEBULA_DB_APP_USER must be set}:${NEBULA_DB_APP_PASSWORD:?NEBULA_DB_APP_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      NEBULA_REDIS_URL: redis://:${NEBULA_REDIS_PASSWORD:?NEBULA_REDIS_PASSWORD must be set}@redis:6379/0
+      NEBULA_JWT_KEY_ID: ${NEBULA_JWT_KEY_ID:?NEBULA_JWT_KEY_ID must be set}
+      NEBULA_JWT_PRIVATE_KEY_FILE: /etc/nebula/secrets/jwt_private_key
+      NEBULA_JWT_PUBLIC_KEY_FILE: /etc/nebula/secrets/jwt_public_key
+      # NEBULA_JWT_PREVIOUS_PUBLIC_KEYS_DIR is deliberately not set here --
+      # key_material.py requires the directory to actually exist once this
+      # setting is non-empty, so a fresh deploy with no retired keys yet
+      # would fail to start. Compose has no conditional-key syntax, so
+      # enabling a rotation means adding the one line back under the
+      # relevant service here (plus creating the directory under
+      # /etc/nebula/secrets/) and redeploying; see docs/environment.md's
+      # "Key rotation procedure". Same reasoning for the token pepper and
+      # MFA key previous-dirs below.
+      NEBULA_TOKEN_KEY_VERSION: ${NEBULA_TOKEN_KEY_VERSION:?NEBULA_TOKEN_KEY_VERSION must be set}
+      NEBULA_TOKEN_PEPPER_FILE: /etc/nebula/secrets/token_pepper
+      NEBULA_MFA_KEY_VERSION: ${NEBULA_MFA_KEY_VERSION:?NEBULA_MFA_KEY_VERSION must be set}
+      NEBULA_MFA_ENCRYPTION_KEY_FILE: /etc/nebula/secrets/mfa_encryption_key
+      NEBULA_XRAY_KEY_VERSION: ${NEBULA_XRAY_KEY_VERSION:?NEBULA_XRAY_KEY_VERSION must be set}
+      NEBULA_XRAY_ENCRYPTION_KEY_FILE: /etc/nebula/secrets/xray_encryption_key
+      # Empty on a fresh install: `nebula-api initialize` then issues the
+      # control plane's agent identity into nebula-state, from the node CA it
+      # also creates there. /etc/nebula/secrets is read-only to this container,
+      # so pointing these at it only works for material placed there by hand
+      # (an installation older than enrolment sets all three in compose.env).
+      NEBULA_AGENT_TRUSTED_CA_FILE: ${NEBULA_AGENT_TRUSTED_CA_FILE:-}
+      NEBULA_AGENT_CLIENT_CERT_FILE: ${NEBULA_AGENT_CLIENT_CERT_FILE:-}
+      NEBULA_AGENT_CLIENT_KEY_FILE: ${NEBULA_AGENT_CLIENT_KEY_FILE:-}
+      # Without this, every request reaching the API appears to come from
+      # this network's gateway: nginx runs on the host and proxies to the
+      # published port, so the container's socket peer is always
+      # 172.30.100.1 (confirmed against the real deployment by reading
+      # /proc/net/tcp inside this container while driving requests through
+      # nginx). auth/http.py's client_network_prefix() derives its
+      # rate-limit bucket from that peer, so the whole user base collapsed
+      # into one bucket -- 10 logins per 15 minutes globally rather than per
+      # client network, which locks everyone out instead of the abuser.
+      #
+      # uvicorn already enables its ProxyHeadersMiddleware by default; what
+      # was missing is telling it which peer is actually the trusted proxy
+      # (its default is 127.0.0.1, which never matches this gateway, so the
+      # middleware silently never fired). Deliberately the single gateway
+      # address and NOT "*": uvicorn only walks X-Forwarded-For
+      # right-to-left for the first untrusted hop -- which is what makes a
+      # client-supplied value unspoofable, since nginx appends the real peer
+      # -- when it has a concrete trust list. "*" switches it to taking the
+      # leftmost value verbatim, which would turn this fix into a
+      # rate-limit bypass. The gateway is stable because the frontend
+      # subnet is pinned below.
+      FORWARDED_ALLOW_IPS: 172.30.100.1
+    volumes:
+      - /etc/nebula/secrets:/etc/nebula/secrets:ro
+      # Writable, unlike the secrets mount above. This is where the
+      # installation keeps what it generates for itself -- the deployment
+      # secret, which signs node enrolment tokens. Losing this volume
+      # invalidates every outstanding enrolment, so it is a named volume
+      # rather than anything tied to a container's lifetime.
+      - nebula-state:/var/lib/nebula
+    # api runs as a non-root, non-`root`-group UID (see services/api/Dockerfile);
+    # this supplementary group is what actually lets it read files owned
+    # root:nebula-secrets 640 -- see README.md's install steps for creating
+    # that host group at this exact GID.
+    group_add:
+      - "9443"
+    # Each VPN server's agent address is a per-row database field
+    # (vpn_servers.agent_host/agent_port, set via `nebula-api
+    # create-vpn-server`), not an environment variable. api's own 127.0.0.1
+    # is the container's loopback, not the host's, on a bridge network, so a
+    # colocated agent must be addressed by this network's own gateway IP --
+    # 172.30.101.1, matching the fixed `backend` subnet below. (Docker's
+    # `host.docker.internal: host-gateway` special value looks like the
+    # obvious alternative, but it resolves to the *default* bridge's gateway
+    # regardless of which network a container is actually attached to --
+    # not reachable from a custom network like this one, confirmed the hard
+    # way against a real deployment.) The agent must also be told to allow
+    # this specific subnet in via the host firewall; see README.md.
+    ports:
+      - "127.0.0.1:${API_PORT:-8000}:8000"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # The entrypoint's bootstrap writes a row, and the API refuses to serve
+      # a schema that is not at the revision its code expects. Both need the
+      # migration to have finished, not merely started.
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/readyz', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+    networks: [frontend, backend]
+    logging: *default-logging
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../../services/worker
+    environment:
+      NEBULA_ENV: production
+      NEBULA_LOG_LEVEL: ${NEBULA_LOG_LEVEL:-INFO}
+      NEBULA_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_APP_USER:?NEBULA_DB_APP_USER must be set}:${NEBULA_DB_APP_PASSWORD:?NEBULA_DB_APP_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      NEBULA_REDIS_URL: redis://:${NEBULA_REDIS_PASSWORD:?NEBULA_REDIS_PASSWORD must be set}@redis:6379/0
+      NEBULA_EMAIL_PROVIDER: ${NEBULA_EMAIL_PROVIDER:?NEBULA_EMAIL_PROVIDER must be set (smtp or resend)}
+      NEBULA_EMAIL_FROM: ${NEBULA_EMAIL_FROM:?NEBULA_EMAIL_FROM must be set}
+      # Only the variables matching the chosen NEBULA_EMAIL_PROVIDER need a
+      # real value; the other provider's variables are simply unused. The
+      # smtp_host default below is an RFC 2606 .invalid placeholder, not
+      # empty, because Settings.smtp_host requires a non-empty string even
+      # when the resend path is the one actually in use.
+      NEBULA_SMTP_HOST: ${NEBULA_SMTP_HOST:-unset.invalid}
+      NEBULA_SMTP_PORT: ${NEBULA_SMTP_PORT:-587}
+      NEBULA_SMTP_USERNAME: ${NEBULA_SMTP_USERNAME:-}
+      NEBULA_SMTP_STARTTLS: ${NEBULA_SMTP_STARTTLS:-true}
+      NEBULA_SMTP_PASSWORD_FILE: /etc/nebula/secrets/smtp_password
+      NEBULA_RESEND_API_KEY_FILE: /etc/nebula/secrets/resend_api_key
+    volumes:
+      - /etc/nebula/secrets:/etc/nebula/secrets:ro
+    # See the identical note on the api service above.
+    group_add:
+      - "9443"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # The loop touches this file after every poll that returned. Older than
+    # two minutes, at a five-second poll interval, means it is wedged --
+    # which until now was invisible: this process has no port to probe, so
+    # the only failure Docker could see was it exiting, while a worker stuck
+    # on a provider that never answers leaves every activation and
+    # password-reset email unsent.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/nebula-worker-poll') > 120)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    # backend is internal: true (no route out, by design, for postgres/redis
+    # isolation) -- unlike every other backend-only service, the worker also
+    # needs real internet egress to reach the SMTP/Resend provider, so it
+    # joins frontend too, the same way api does for its own reasons. This
+    # opens no new inbound surface: worker publishes no ports.
+    networks: [frontend, backend]
+    logging: *default-logging
+    restart: unless-stopped
+
+  usage:
+    # Reads every server's traffic counters, cuts off an account that has spent
+    # its allowance or whose access has lapsed, and takes its credentials off
+    # the servers -- every fifteen seconds. How often this runs is how far past
+    # its allowance an account gets: once a minute let a phone on a 30 MB
+    # allowance reach 76 MB at 1 MB/s. A long-running process rather than a
+    # faster timer, so a pass does not pay for starting Python, loading the key
+    # ring and connecting to Postgres each time; a container rather than a
+    # `docker exec` loop, because exec does not pass `docker stop`'s signal on
+    # and leaves the old loop running.
+    #
+    # nebula-reconcile.service still runs a single pass every fifteen minutes,
+    # and alerts when it fails: if this container stops, allowances are still
+    # enforced at that cadence.
+    build:
+      context: ../../services/api
+    # The image's entrypoint prepares the installation, which is the API's job
+    # and would race it here. This only needs what the API has already set up,
+    # hence depending on it being healthy.
+    entrypoint: []
+    command: ["nebula-api", "collect-usage", "--every", "15"]
+    environment: *api-environment
+    volumes:
+      - /etc/nebula/secrets:/etc/nebula/secrets:ro
+      # The agent client identity the API issues there; without it every pass
+      # fails with AgentClientError (fresh install, 2026-10-26).
+      - nebula-state:/var/lib/nebula:ro
+    # See the identical note on the api service above.
+    group_add:
+      - "9443"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    # The loop touches this file after every pass that finished. Older than two
+    # minutes means eight passes in a row hung or failed.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, sys, time; sys.exit(time.time() - os.path.getmtime('/tmp/nebula-usage-pass') > 120)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    # The same networks as api: Postgres is on backend, and a colocated agent is
+    # addressed by backend's gateway, which the host firewall admits.
+    networks: [frontend, backend]
+    logging: *default-logging
+    restart: unless-stopped
+
+  # One-shot: delete history past the retention policy. Run weekly by
+  # nebula-prune.timer, never by `up` -- the `tools` profile keeps it out of
+  # one, and `run` ignores profiles for a service named explicitly.
+  #
+  # Its own service rather than a `docker exec` into the API, because it
+  # carries a credential the API deliberately does not have: `audit_logs` is
+  # append-only to the application role, which is what makes an audit row
+  # evidence. This is the only place besides `migrate` that holds the
+  # migration credential.
+  prune:
+    profiles: ["tools"]
+    build:
+      context: ../../services/api
+    # The image's entrypoint prepares the installation, which is the API's
+    # job; this command only reads and deletes rows.
+    entrypoint: []
+    command: ["nebula-api", "prune-history"]
+    environment:
+      <<: *api-environment
+      NEBULA_MIGRATION_DATABASE_URL: postgresql+psycopg://${NEBULA_DB_MIGRATOR_USER:?NEBULA_DB_MIGRATOR_USER must be set}:${NEBULA_DB_MIGRATOR_PASSWORD:?NEBULA_DB_MIGRATOR_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+    volumes:
+      - /etc/nebula/secrets:/etc/nebula/secrets:ro
+    group_add:
+      - "9443"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    networks: [backend]
+    logging: *default-logging
+    restart: "no"
+
+  dns:
+    # Nebula's own resolver for tunnelled Xray clients (roadmap 26): AdGuard
+    # Home, no filtering, nothing logged, upstream over DNS-over-HTTPS. Xray
+    # on the host redirects the clients' DNS address to 127.0.0.1:5354; see
+    # infrastructure/adguard/README.md. Pinned by digest (v0.107.79).
+    image: adguard/adguardhome@sha256:aba9e3bf0613be3ba3755e1fc311b126e2c24bec25e18b6483894a88283074f0
+    ports:
+      # Loopback only: Xray on the host is the one client. Its page is not
+      # published at all -- the configuration has no users to log in with.
+      - "127.0.0.1:5354:5353/udp"
+      - "127.0.0.1:5354:5353/tcp"
+    volumes:
+      # Its own copy: AdGuard Home rewrites its config file.
+      - /etc/nebula/adguard/conf:/opt/adguardhome/conf
+      - /var/lib/nebula/adguard/work:/opt/adguardhome/work
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    # The binary carries this as a file capability; without it in the
+    # bounding set the kernel refuses to start it at all ("operation not
+    # permitted"). It listens on 5353 and 3000, so it never uses it.
+    cap_add: [NET_BIND_SERVICE]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 256M
+    logging: *default-logging
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: ../../apps/admin
+      # next.config.ts's serverActions.allowedOrigins only ever reads
+      # NEBULA_ADMIN_ORIGIN at `next build` time, unlike the API base URL,
+      # which the app reads per-request at runtime -- so the real public
+      # origin has to be passed as a build arg here, not only as the
+      # container env var below, or every Server Action fails behind this
+      # reverse proxy's non-default port.
+      args:
+        NEBULA_API_INTERNAL_URL: http://api:8000
+        NEBULA_ADMIN_ORIGIN: ${NEBULA_ADMIN_PUBLIC_URL:?NEBULA_ADMIN_PUBLIC_URL must be set}
+    environment:
+      NEBULA_API_INTERNAL_URL: http://api:8000
+      NEBULA_ADMIN_ORIGIN: ${NEBULA_ADMIN_PUBLIC_URL:?NEBULA_ADMIN_PUBLIC_URL must be set}
+    ports:
+      - "127.0.0.1:${ADMIN_PORT:-3000}:3000"
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:3000/api/health",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    networks: [frontend]
+    logging: *default-logging
+    restart: unless-stopped
+
+networks:
+  # Fixed subnets, not Docker's default dynamic allocation -- a colocated
+  # bare-metal service (the VPN agent) needs a host firewall rule allowing
+  # this specific range in, and that rule would go stale every time the
+  # stack recreates if the subnet weren't pinned.
+  frontend:
+    ipam:
+      config:
+        - subnet: 172.30.100.0/24
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.101.0/24
+
+volumes:
+  postgres-data:
+  redis-data:
+  # Generated deployment state; see the api service's volumes above.
+  nebula-state:

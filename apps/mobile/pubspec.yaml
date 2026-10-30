@@ -1,0 +1,81 @@
+name: nebula_mobile
+description: Nebula VPN Android and Windows client shell.
+publish_to: none
+version: 0.1.33+2035
+
+environment:
+  sdk: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"
+
+dependencies:
+  camera: 0.12.1
+  cryptography: 2.9.0
+  dio: 5.11.1
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  flutter_riverpod: 3.4.3
+  flutter_secure_storage: 11.2.0
+  flutter_v2ray_client: ^3.4.1
+  go_router: 18.0.1
+  intl: any
+  shared_preferences: 2.5.6
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
+  # QR codes decoded in Dart from the camera's frames: ZXing, open source,
+  # where mobile_scanner bundled Google's closed ML Kit (and Play Services
+  # and Firebase parts) into a GPL app built for privacy.
+  zxing2: 0.2.4
+
+dev_dependencies:
+  # Drives the auth notifier's own retry timer in tests without waiting
+  # fifteen real seconds for it.
+  fake_async: ^1.3.3
+  flutter_lints: 6.0.0
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  # Generates lib/l10n/app_localizations.dart from the ARB files. Checked in
+  # rather than generated at build time would mean two sources of truth for
+  # every string; this keeps the ARB files the only place copy is written.
+  generate: true
+
+  # Windows only. Listed plainly, these went into every build: each Android
+  # APK carried ~30 MB of xray.exe, hysteria.exe and their geo files, which
+  # Android cannot run and already has in its own form.
+  assets:
+    # The notices the bundled engines' licenses ask to travel with them.
+    - assets/licenses/
+    - path: assets/windows_runtime/
+      platforms: [windows]
+    - path: assets/app_icon.ico
+      platforms: [windows]
+    - path: assets/linux_runtime/
+      platforms: [linux]
+
+  # Bundled, not fetched. The `google_fonts` package resolves faces from
+  # fonts.googleapis.com at runtime, which is blocked on the networks this app
+  # exists to get around -- the first launch that matters would fall back to
+  # Roboto, and the design's display sizes depend on Geist's tighter negative
+  # tracking. Geist is SIL OFL 1.1; assets/fonts/OFL.txt is the licence.
+  #
+  # Only the weights the design uses are bundled, so this costs ~665 KB rather
+  # than the ~2.5 MB the full families would.
+  fonts:
+    - family: Geist
+      fonts:
+        - asset: assets/fonts/Geist-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Geist-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Geist-SemiBold.ttf
+          weight: 600
+    - family: GeistMono
+      fonts:
+        - asset: assets/fonts/GeistMono-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/GeistMono-Medium.ttf
+          weight: 500

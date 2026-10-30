@@ -1,0 +1,39 @@
+[Unit]
+# Deletes operational history once it is older than the retention policy
+# docs/threat-model.md states -- 365 days for administrator audit events, 90
+# for the reconciliation, agent-operation, health and email rows. Nothing
+# enforced that before this unit existed, so every one of those tables grew
+# for as long as the deployment had been running, on a disk shared with the
+# database itself.
+Description=Nebula VPN history retention sweep
+Requires=docker.service
+After=docker.service network-online.target nebula-compose.service
+Wants=network-online.target
+
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nebula/infrastructure/compose
+# `run --rm` on the compose `prune` service rather than `docker exec` into
+# the API container, unlike nebula-reconcile.service: `audit_logs` is
+# append-only to the application credential the API runs as (migration
+# 20260720_0003 revokes UPDATE and DELETE from it), and that property is
+# worth keeping. The compose service carries the migration credential
+# instead, which is the one allowed to delete audit rows.
+#
+# `--no-TTY` because systemd gives it no terminal. The service sits behind a
+# `tools` profile so a plain `up -d` never starts it, and `run` ignores
+# profiles for a service named explicitly -- the same arrangement the
+# `migrate` service used to use.
+ExecStart=/usr/bin/docker compose -p nebula-production \
+  --env-file /etc/nebula/compose.env \
+  -f /opt/nebula/infrastructure/compose/production.yaml \
+  run --rm --no-TTY prune
+# Deleting a year of history the first time it runs is far more rows than a
+# weekly run afterwards, and the command commits in batches, so a long first
+# pass is expected and interrupting it only means the rest waits a week.
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,86 @@
+name: Compose
+
+on:
+  pull_request:
+    paths:
+      - "compose.yaml"
+      - "infrastructure/compose/production.yaml"
+      - ".dockerignore"
+      - "apps/admin/**"
+      - "services/api/**"
+      - "services/vpn-agent/**"
+      - "services/worker/**"
+      - ".github/workflows/compose.yml"
+  push:
+    branches: [main]
+    paths:
+      - "compose.yaml"
+      - "infrastructure/compose/production.yaml"
+      - ".dockerignore"
+      - "apps/admin/**"
+      - "services/api/**"
+      - "services/vpn-agent/**"
+      - "services/worker/**"
+      - ".github/workflows/compose.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compose-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    # GitHub-hosted: the repository is public, so these are free, and no job
+    # ever runs on the project's own servers.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Validate configuration
+        run: docker compose config --quiet
+
+      # The production file is the one that gets deployed, and nothing here
+      # parsed it until a duplicate key reached the server and stopped a
+      # release. It cannot be brought up in CI -- it wants real secrets, real
+      # volumes and a real host -- but it can be parsed, which is all that
+      # class of fault needs.
+      #
+      # The values are placeholders for the `${VAR:?}` guards only. Compose
+      # substitutes them and never connects to anything, so nothing here has
+      # to be real, and deliberately nothing here looks like it could be.
+      - name: Validate the production configuration
+        run: |
+          set -euo pipefail
+          env_file="$(mktemp)"
+          grep -o '${[A-Z_][A-Z_0-9]*:?' infrastructure/compose/production.yaml \
+            | sed 's/^${//; s/:?$//' \
+            | sort -u \
+            | while read -r name; do echo "${name}=ci-placeholder"; done > "$env_file"
+          docker compose --profile tools --env-file "$env_file" \
+            -f infrastructure/compose/production.yaml config --quiet
+
+  smoke:
+    # Deliberately not the self-hosted runner, and this is not a preference.
+    # `docker compose up` on the dev stack publishes 127.0.0.1:8000, which is
+    # the port nebula-production-api-1 already publishes on that host, so the
+    # job cannot bind and fails on the API container every time. It needs a
+    # host that is not already running this software.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Build and wait for health
+        run: docker compose up --build --detach --wait --wait-timeout 180
+      - name: Show service state
+        if: always()
+        run: docker compose ps
+      - name: Show failure logs
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose down --volumes --remove-orphans

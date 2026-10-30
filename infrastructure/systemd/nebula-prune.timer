@@ -1,0 +1,17 @@
+[Unit]
+Description=Weekly Nebula VPN history retention sweep
+
+[Timer]
+# Weekly, not daily: nothing here is urgent -- a row a few days past its
+# retention period harms nobody -- and the first pass on a table that has
+# never been pruned is the expensive one. Sunday early morning, well clear
+# of the nightly backup at 00:05 so the two never contend for the same
+# database.
+OnCalendar=Sun 04:30
+RandomizedDelaySec=900
+# A host that was powered off through a firing runs it once on boot instead
+# of silently skipping the week.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

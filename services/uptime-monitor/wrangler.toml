@@ -1,0 +1,22 @@
+# External monitoring (roadmap 44): checks the app's fronts from Cloudflare
+# every 15 minutes and emails an alert while any of them fails.
+# Needs Email Routing on the sending zone, with the recipient verified there.
+#   npx wrangler secret put ALERT_TO     (the verified recipient address)
+#   npx wrangler secret put ALERT_FROM   (a sender on the zone, e.g. monitor@example.com)
+#   npx wrangler secret put TARGETS      (comma-separated https URLs to check, each an
+#                                         unauthenticated API call answering a JSON 401
+#                                         when front, origin and API are all up)
+#   npx wrangler deploy
+# Secrets rather than [vars], so no deployment's addresses live in the repository.
+name = "nebula-uptime-monitor"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = false
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+# Any verified destination of the zone; which one is the ALERT_TO secret.
+[[send_email]]
+name = "MAIL"
+

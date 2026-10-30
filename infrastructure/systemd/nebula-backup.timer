@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Nebula VPN off-host encrypted backup
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1800
+Persistent=true
+
+[Install]
+WantedBy=timers.target

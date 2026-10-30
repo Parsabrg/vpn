@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The notification icon is looked up by name (getIdentifier) inside the VPN
+  plugin, so nothing references it the way resource shrinking can see. Without
+  this a release build strips it and the notification has no icon.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_stat_nebula" />

@@ -1,0 +1,25 @@
+[Unit]
+Description=Run the Nebula VPN health check periodically
+
+[Timer]
+# Every 20 minutes. Chosen against what it is watching rather than picked
+# round: the tightest thing here is nebula-reconcile.timer, which fires every
+# 15 minutes and is now load-bearing for revocation, so a stopped reconcile
+# timer is noticed within about an hour rather than whenever someone looks.
+#
+# Not tighter than that. The check spends two 20-second samples watching
+# restart counters and then probes every advertised endpoint, so running it
+# every few minutes would mostly be measuring itself.
+OnCalendar=*:0/20
+# Off the exact boundary, so this does not sample restart counters in the same
+# second the reconcile sweep is restarting Xray to apply something -- which
+# would read a normal apply as movement.
+RandomizedDelaySec=180
+# Also run shortly after boot: a host that came back up wrong is exactly the
+# case worth hearing about, and waiting up to 20 minutes to ask is a poor
+# trade for a check this cheap.
+OnBootSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

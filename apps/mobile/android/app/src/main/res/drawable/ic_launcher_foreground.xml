@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The Nebula mark: a point of light, an orbit around it, and the glow of the
+  cloud behind. The dot is the same live dot the Connect screen puts beside a
+  server that is up; the blue is the app's accent.
+
+  108dp adaptive canvas. Everything sits inside the central 66dp safe zone, so
+  no launcher mask can clip it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path android:pathData="M20,54 a34,34 0 1,0 68,0 a34,34 0 1,0 -68,0 Z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:type="radial"
+                android:centerX="54"
+                android:centerY="54"
+                android:gradientRadius="34"
+                android:startColor="#8C6E8BFF"
+                android:endColor="#006E8BFF" />
+        </aapt:attr>
+    </path>
+    <group
+        android:rotation="-28"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:pathData="M27,54 A27,10.5 0 1,0 81,54 A27,10.5 0 1,0 27,54 Z"
+            android:strokeColor="#6E8BFF"
+            android:strokeWidth="3" />
+    </group>
+    <path
+        android:pathData="M45.5,54 a8.5,8.5 0 1,0 17,0 a8.5,8.5 0 1,0 -17,0 Z"
+        android:fillColor="#EDEFFF" />
+</vector>

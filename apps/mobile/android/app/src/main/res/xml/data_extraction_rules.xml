@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ splits what android:allowBackup used to cover. allowBackup="false"
+  stops cloud backup, but device-to-device transfer is governed only by this
+  file, so without it a direct transfer still carries everything across.
+
+  Both paths exclude the whole app. The app stores session tokens (via
+  flutter_secure_storage, which on Android is EncryptedSharedPreferences under
+  shared_prefs/) and a device identifier. Their encryption key lives in the
+  Android Keystore and is not itself backed up, so a restored copy is not
+  readable elsewhere. That is a property of the keystore rather than a decision
+  this app made, and it is the wrong thing to depend on for a tool whose users
+  are specifically at risk from device seizure.
+
+  (No double hyphen anywhere in this comment: XML forbids it inside a comment,
+  and aapt fails the whole resource parse rather than warning.)
+
+  Nothing here is worth restoring: signing in again re-issues the tokens and a
+  new device record. So the cost of excluding everything is one sign-in, and
+  the cost of not excluding it is a copy of a censorship-circumvention app's
+  credentials leaving the device.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+    </device-transfer>
+</data-extraction-rules>

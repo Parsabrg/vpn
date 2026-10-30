@@ -1,0 +1,121 @@
+[Unit]
+Description=Nebula VPN Xray (VLESS + Hysteria2) server process
+After=network-online.target
+Wants=network-online.target
+
+# The config file is written by nebula-vpn-agent.service (see
+# services/vpn-agent/deploy/nebula-vpn-agent.service), never by this unit --
+# this process only ever reads it. On a fresh host the agent may not have
+# provisioned a first client yet, so this condition skips a noisy
+# crash-restart loop rather than treating a not-yet-provisioned host as a
+# failure; once the agent writes the file, starting this unit (or its next
+# ordinary Restart=on-failure attempt) picks it up.
+ConditionPathExists=/etc/nebula/xray/config.json
+
+# systemd's defaults (5 starts / 10s) assume a service restarting that often
+# is crash-looping. Here restarts are the normal apply mechanism:
+# drivers/xray.py restarts this unit for every provision and revoke, so any
+# burst of six or more operations within ten seconds -- a reconciliation
+# sweep repairing several clients, or simply several devices connecting at
+# once -- has its tail refused with "Start request repeated too quickly", and
+# the agent correctly reports those applies as failed. Confirmed against the
+# real deployment: a sweep of seven revokes landed five and lost the last two
+# to exactly this.
+#
+# Both directives belong in [Unit], not [Service]: systemd moved them here in
+# v229, and a StartLimitIntervalSec= left in [Service] is silently ignored
+# (verified on the deployment host -- the burst applied and the interval
+# stayed at the 10s default until it was moved).
+#
+# Raising the ceiling does weaken the genuine crash-loop protection this
+# setting also provides. That is acceptable here only because the agent
+# already guards that failure mode at the source, and more precisely: it
+# validates every candidate config with `xray run -test` before writing it,
+# and rolls back to the last-known-good config when an apply fails. A config
+# bad enough to crash-loop this unit should not reach it in the first place.
+StartLimitIntervalSec=60
+StartLimitBurst=50
+
+# Report a failure instead of leaving it in the journal for nobody. This
+# fires only when the unit enters `failed`; crash loops and stopped timers
+# never reach that state, and nebula-healthcheck.timer covers those.
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=simple
+User=nebula-xray
+Group=nebula-xray
+
+# XHTTP's inbound stays loopback-only, with nginx doing TLS termination and
+# holding the public socket (../nginx/xray-8445.conf) -- but gRPC, WebSocket,
+# raw TCP, and Hysteria2 (see settings.py's xray_grpc_enabled/xray_ws_enabled/
+# xray_tcp_enabled/xray_hysteria_enabled) each bind publicly and terminate
+# TLS/QUIC directly in Xray itself. All of these ports are still >1024
+# (unprivileged), so no capability is needed to bind them -- unlike the
+# agent's own unit, which needs CAP_NET_ADMIN for the WireGuard interface --
+# this unit's CapabilityBoundingSet is deliberately left empty.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+UMask=0077
+
+# Xray only ever reads its config file -- the agent (a separate process,
+# separate systemd unit, separate ReadWritePaths of its own) owns every
+# write to /etc/nebula/xray and /var/lib/nebula/xray. This unit gets no
+# ReadWritePaths at all: under ProtectSystem=strict the whole filesystem
+# outside /var/lib/private, /var/lib (StateDirectory=), /etc (config for
+# systemd-managed units), /run and /root is already read-only, and
+# ReadOnlyPaths= below is only for explicitness/documentation, matching how
+# nebula-vpn-agent.service documents its own ReadOnlyPaths=/etc/nebula/secrets
+# even though ProtectSystem=strict already implies it.
+#
+# xray_tls_cert_file/xray_tls_key_file (settings.py) must resolve to a path
+# under one of these ReadOnlyPaths, or Xray will fail to start the moment any
+# of gRPC/WebSocket/raw-TCP/Hysteria2 is enabled with real TLS material --
+# ProtectSystem=strict makes everything else read-only, but a path outside
+# these explicit entries is not readable at all. /etc/letsencrypt/live and
+# /etc/letsencrypt/archive cover a certbot-issued cert (the common
+# case); adjust if
+# the deploying host keeps its certificate material somewhere else.
+ReadOnlyPaths=/etc/nebula/xray /etc/letsencrypt/live /etc/letsencrypt/archive
+
+# Matches Settings.xray_binary / Settings.xray_config_dir defaults in
+# services/vpn-agent/src/nebula_agent/settings.py exactly. If an operator
+# overrides either setting there, this file needs a matching edit -- nothing
+# enforces the two staying in sync automatically.
+ExecStart=/usr/local/bin/xray run -config /etc/nebula/xray/config.json
+
+# No ExecReload= -- Xray-core has no SIGHUP-based hot config reload
+# (confirmed live: sending it SIGHUP just kills the process, since it
+# installs no handler and the OS default action for SIGHUP is termination).
+# drivers/xray.py's NativeXrayDriver applies every provision/revoke with
+# `systemctl restart nebula-xray` instead (see build_reload_argv()), which
+# needs no ExecReload= at all. If a future Xray-core version adds real
+# SIGHUP reload support, this could be revisited -- but don't add
+# ExecReload= back without re-verifying against the real binary first.
+# Governs only the *automatic* restart after an unexpected exit, never the
+# `systemctl restart` the agent issues to apply a config -- those are
+# immediate, so raising this does not slow provisioning at all. It slows a
+# crash loop, which is the only thing it does slow. Worth doing because a bad
+# config once restarted this unit 25,126 times without anyone noticing: at 2-3
+# seconds a loop is fast enough to bury every other message in the journal
+# while looking, from outside, like a service that is merely up.
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

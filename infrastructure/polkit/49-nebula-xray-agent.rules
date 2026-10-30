@@ -1,0 +1,35 @@
+// Authorizes the unprivileged `nebula-agent` system user to control exactly
+// the two systemd units it renders config for -- `nebula-xray.service` and
+// `nebula-hysteria.service` -- and nothing else. Without
+// this, `systemctl reload-or-restart nebula-xray` (see
+// services/vpn-agent/src/nebula_agent/drivers/xray.py's build_reload_argv())
+// fails with "Interactive authentication required": polkit denies systemd
+// unit management to any non-root user by default, confirmed live against a
+// real deployment where every Xray provision failed at the apply step for
+// exactly this reason, including its own rollback retry -- surfacing as a
+// bare unhandled 500 from the agent (drivers/errors.py's
+// RollbackFailedError propagating past both attempts).
+//
+// Hysteria2 is a second unit because it is a second binary: Xray-core
+// accepts the obfuscation setting and silently discards it, so that
+// transport is served by the standalone `hysteria` binary instead (see
+// docs/adr/0003). The agent renders both configs and must restart both.
+//
+// Scoped to org.freedesktop.systemd1.manage-units on these unit names so
+// nebula-agent cannot start/stop/restart anything else on the host -- this
+// does not grant sudo or root, only exactly the systemd action the driver's
+// own fixed argv already performs.
+//
+// Install: copy to /etc/polkit-1/rules.d/49-nebula-xray-agent.rules on the
+// host (root:root, 0644). polkit picks up rules.d changes automatically via
+// inotify; `systemctl restart polkit` if it does not seem to take effect.
+polkit.addRule(function (action, subject) {
+    if (
+        action.id == "org.freedesktop.systemd1.manage-units" &&
+        (action.lookup("unit") == "nebula-xray.service" ||
+            action.lookup("unit") == "nebula-hysteria.service") &&
+        subject.user == "nebula-agent"
+    ) {
+        return polkit.Result.YES;
+    }
+});

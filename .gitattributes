@@ -1,0 +1,37 @@
+# Shell scripts must keep LF endings whatever platform checks them out.
+#
+# These run inside Linux containers, and several are now copied into images at
+# build time. A CRLF checkout turns the shebang into `#!/bin/sh\r`, which the
+# kernel reports as "no such file or directory" while naming an interpreter
+# that plainly exists -- one of the least searchable errors in Docker, and one
+# that only appears for contributors on Windows.
+*.sh text eol=lf
+
+# Same reasoning: read by Linux tooling, and a stray CR is either a syntax
+# error or an invisible part of a value.
+Dockerfile text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Patch files must keep LF, and are the one case where a CRLF checkout breaks
+# the tool that consumes them rather than something downstream.
+#
+# `git apply` compares the patch's context lines against the file it is
+# patching byte for byte. The vendored plugin's source comes from the pub
+# cache with LF endings, so a patch checked out with CRLF matches nothing and
+# `third_party_src/vendor_plugin.py` fails with "patch does not apply" on
+# every file at once -- which reads like the patch has gone stale against a
+# new upstream release, not like a line-ending problem. It cost two debugging
+# rounds before the cause was obvious, and it came back after every branch
+# switch, because checkout re-applied the conversion each time.
+*.patch text eol=lf
+
+# Flutter's own generated files, which it writes with LF on every platform
+# including this one. Without this the tree is dirty after every
+# `flutter pub get` on Windows with no diff to show for it -- `git status`
+# lists them as modified and `git diff` prints nothing -- which is how an
+# unrelated file gets swept into a commit by a reflexive `git add -A`.
+apps/mobile/windows/flutter/generated_plugin_registrant.cc text eol=lf
+apps/mobile/windows/flutter/generated_plugins.cmake text eol=lf
+# OpenSSH reads it; a carriage return would end up in the key line.
+docs/release-signers text eol=lf

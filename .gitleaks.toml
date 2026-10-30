@@ -1,0 +1,68 @@
+title = "Nebula secret scanning policy"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Known local-only placeholders"
+regexTarget = "match"
+regexes = [
+  '''replace-local-only''',
+  '''replace_with_public_recipient''',
+  # WireGuard test fixtures. These are base64 of the ASCII strings
+  # "private-key-for-testing-00000000" and "public-key-for-testing-000000000"
+  # -- valid-shaped keys so the renderer can be tested against something the
+  # right length, and deliberately not random, so decoding one says plainly
+  # what it is. Listed as exact literals rather than exempting test files or
+  # the base64 rule: a real key committed next to these still fails the scan.
+  '''cHJpdmF0ZS1rZXktZm9yLXRlc3RpbmctMDAwMDAwMDA=''',
+  '''cHVibGljLWtleS1mb3ItdGVzdGluZy0wMDAwMDAwMDA=''',
+  # The local proxy password in the Xray config tests: the bytes 00 to ff
+  # counted up in hex, the right length and alphabet for a generated
+  # password and plainly not one. An exact literal, like the keys above.
+  '''00112233445566778899aabbccddeeff''',
+  # The key of a self-signed www.gstatic.com certificate made for the tunnel
+  # probe's test (apps/mobile/test/core/xray/answers_through_socks_test.dart):
+  # it signs nothing but the test's own loopback TLS server. Its first line,
+  # exactly, so any other key still fails the scan.
+  '''MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQgRAVYax/KpZdLz2Mp''',
+  # This app's SharedPreferences key names, which are not credentials. The
+  # generic-api-key rule scores them as high-entropy because of the dotted,
+  # underscored shape that every one of them has, and there are a dozen --
+  # listing each literal would mean a CI failure every time a setting is
+  # added, which is how an allowlist stops being read.
+  #
+  # Narrow on purpose: the `nebula.` prefix plus lowercase, digits and
+  # underscores is the shape of a preference key and is not the shape of any
+  # credential. A real secret does not match this, so one committed beside
+  # them still fails the scan -- which is the property the fixtures above
+  # were written to keep.
+  '''nebula\.[a-z0-9_]+''',
+  # SHA-256 digests of the Xray and Hysteria2 Windows release binaries, pinned
+  # in tool/vendor_windows_runtime.ps1 and compared against Get-FileHash before
+  # the download is used. 64 hex characters is also the shape of a JFrog
+  # identity token, which is the rule that fires on them. Exact literals, like
+  # the fixtures above: these are published digests of public binaries, and a
+  # real token committed beside them still fails the scan.
+  # The example recipient from age's own documentation, used in the
+  # installer's backup tests on a feature branch. gitleaks scans
+  # every ref with this branch's config, so without the entry here every
+  # pull request to main fails while that branch exists. An age recipient is
+  # a public key and this one is published; an exact literal, like the rest.
+  '''age1ql3z7hjy54pw3hyww5ayyfg7zqgvc7w3j2elw8zmrj2kg5sfn9aqmcac8p''',
+  '''D004C39288CE9ADA487C6F398C7C545F7D749E44BDFDD59DBC9F865AFBA4E1AD''',
+  # Xray 26.9.30 for Windows, which replaced the line above. Both stay: the
+  # scan reads every commit, and the old digest is still in them.
+  '''B17A619343C11B89D8FAF36278298856749B15C52277D875D32051B33DCDA617''',
+  '''807AE5332A8FEFEEFF804923E057B6942ACCEAA11706AC7FA3DB42F192C2FDE1''',
+  # The same for the Xray Linux release, pinned in
+  # apps/mobile/tool/vendor_linux_runtime.sh and checked with sha256sum.
+  '''23cd9af937744d97776ee35ecad4972cf4b2109d1e0fe6be9930467608f7c8ae''',
+  '''f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e''',
+  # And Hysteria2's Linux release, pinned in the same script.
+  '''6493dfffd55b5883f64c76c63880ecc32988f0c568c9ca9014907877b4d55f94''',
+  # appimagetool 1.9.0 and the AppImage type2 runtime, pinned in
+  # apps/mobile/tool/build_linux_packages.sh.
+  '''46fdd785094c7f6e545b61afcfb0f3d98d8eab243f644b4b17698c01d06083d1''',
+  '''2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d''',
+]

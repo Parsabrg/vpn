@@ -1,0 +1,18 @@
+[Unit]
+Description=Nebula VPN off-host encrypted backup
+Requires=docker.service
+After=docker.service network-online.target nebula-compose.service
+Wants=network-online.target
+
+# Report a failure instead of leaving it in the journal for nobody. This
+# fires only when the unit enters `failed`; crash loops and stopped timers
+# never reach that state, and nebula-healthcheck.timer covers those.
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nebula
+EnvironmentFile=/etc/nebula/compose.env
+EnvironmentFile=/etc/nebula/backup.env
+ExecStart=/opt/nebula/infrastructure/backup/backup.sh
+TimeoutStartSec=600

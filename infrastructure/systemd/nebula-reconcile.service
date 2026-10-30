@@ -1,0 +1,38 @@
+[Unit]
+# Runs both reconciliation passes: each compares what the database believes
+# about a peer/client against what the agent actually has, recovering rows
+# stranded mid-apply by a crash and re-issuing operations the agent lost.
+# Neither pass had anything scheduling it before, so drift was only ever
+# repaired if an operator happened to run the command by hand.
+Description=Nebula VPN reconciliation sweep (WireGuard peers and Xray clients)
+Requires=docker.service
+After=docker.service network-online.target nebula-compose.service
+Wants=network-online.target
+
+# Report a failure instead of leaving it in the journal for nobody. This
+# fires only when the unit enters `failed`; crash loops and stopped timers
+# never reach that state, and nebula-healthcheck.timer covers those.
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/nebula
+# Both passes are one-shot and idempotent, so a non-zero exit means "found
+# something a human should look at" (ambiguous drift, or a repair the agent
+# rejected), not "the sweep is broken". Deliberately not Restart= on that:
+# retrying immediately would just re-record the same ambiguity, and the next
+# timer firing is the right retry cadence.
+ExecStart=/usr/bin/docker exec nebula-production-api-1 nebula-api reconcile-wireguard
+ExecStart=/usr/bin/docker exec nebula-production-api-1 nebula-api reconcile-xray
+# Last, and deliberately after reconcile-xray: that pass can promote a stuck
+# row back to a live state, and this one deletes whatever no live row accounts
+# for. Running the prune first would risk revoking a credential the sweep was
+# about to legitimately reclaim.
+ExecStart=/usr/bin/docker exec nebula-production-api-1 nebula-api prune-xray-orphans
+# Traffic counters. The `usage` container runs this every fifteen seconds, so
+# allowances are enforced promptly; it runs here as well because this unit is
+# the one that alerts, and a source that cannot be read should still reach
+# somebody -- at this unit's cadence, not four times a minute. It is also the
+# fallback that keeps allowances enforced if that container stops.
+ExecStart=/usr/bin/docker exec nebula-production-api-1 nebula-api collect-usage
+TimeoutStartSec=600

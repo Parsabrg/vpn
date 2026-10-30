@@ -1,0 +1,41 @@
+name: Windows
+
+# The Windows build, on GitHub's hosted Windows runner (free for a public
+# repository).
+on:
+  pull_request:
+    paths: ["apps/mobile/**", ".github/workflows/windows.yml"]
+  push:
+    branches: [main]
+    paths: ["apps/mobile/**", ".github/workflows/windows.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portable-x64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # subosito/flutter-action v2.21.0
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: "3.44.0"
+          channel: stable
+      - name: Vendor the pinned Android tunnel dependency
+        working-directory: apps/mobile
+        shell: pwsh
+        run: |
+          flutter pub cache add flutter_v2ray_client --version 3.4.1
+          python third_party_src/vendor_plugin.py
+      - name: Build the portable x64 bundle
+        working-directory: apps/mobile
+        shell: pwsh
+        run: ./tool/build_windows_portable.ps1 -ApiBaseUrl https://api.example.invalid
+      - uses: actions/upload-artifact@v7
+        with:
+          name: NebulaVPN-windows-x64-portable
+          path: apps/mobile/dist/NebulaVPN-windows-x64-portable.zip
+          if-no-files-found: error

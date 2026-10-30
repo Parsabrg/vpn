@@ -1,0 +1,50 @@
+# Asks the questions that no failure event would ever answer.
+#
+# nebula-alert@.service covers a unit entering `failed`. It cannot cover the
+# faults this deployment has actually had: a crash loop never reaches `failed`
+# (the start-rate limit is deliberately huge, because restarts are also how
+# config is applied), a timer that stops firing produces no event at all, and
+# a certificate expiring is not a unit failure. Those are levels, not edges,
+# and only something asking on a schedule can see them.
+
+[Unit]
+Description=Nebula VPN health check
+After=network-online.target
+Wants=network-online.target
+# If the check itself fails -- it could not reach Resend, or a binary it needs
+# is missing -- that failure is reported through the same handler as any
+# other. A monitor that breaks silently is indistinguishable from a healthy
+# system, which is the state this whole thing exists to end.
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nebula/agent.env
+ExecStart=/opt/nebula-vpn-agent/.venv/bin/nebula-agent-healthcheck
+
+# Runs as root to read the journal and the private TLS certificate directory.
+# It writes exactly one file, its own dedupe state.
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+StateDirectory=nebula
+ReadWritePaths=/var/lib/nebula
+ReadOnlyPaths=/etc/nebula/secrets /etc/letsencrypt
+UMask=0077
+
+# Two 20-second samples plus endpoint probes; well under this, but a hung DNS
+# lookup should not leave the check running until the next one starts.
+TimeoutStartSec=180

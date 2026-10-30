@@ -1,0 +1,65 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nebula-vpn-agent"
+version = "0.1.0"
+description = "Nebula VPN host agent with an allowlisted operation surface"
+license = "GPL-3.0-or-later"
+readme = "README.md"
+requires-python = ">=3.12,<3.15"
+dependencies = [
+  "anyio==4.15.1",
+  "cryptography==50.0.2",
+  "fastapi==0.153.0",
+  "pydantic-settings==2.16.1",
+  "uvicorn[standard]==0.54.0",
+]
+
+[project.scripts]
+nebula-agent-serve = "nebula_agent.serve:main"
+nebula-agent-check = "nebula_agent.preflight:main"
+nebula-agent-enroll = "nebula_agent.enrollment:main"
+nebula-agent-healthcheck = "nebula_agent.healthcheck:main"
+nebula-agent-alert = "nebula_agent.healthcheck:alert_unit_main"
+nebula-agent-reachability = "nebula_agent.reachability:main"
+
+[project.optional-dependencies]
+dev = [
+  "httpx2==2.15.1",
+  "mypy==2.4.0",
+  "pip-audit==2.10.1",
+  "pytest==9.1.1",
+  "pytest-cov==7.1.0",
+  "ruff==0.17.1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nebula_agent"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "ASYNC", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["src", "tests"]
+plugins = ["pydantic.mypy"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers --cov=nebula_agent --cov-report=term-missing --cov-fail-under=95"
+testpaths = ["tests"]
+markers = [
+  "netns_integration: requires root and a real WireGuard-capable kernel; run via the netns-integration CI job, never locally",
+]
+
+[tool.coverage.run]
+branch = true

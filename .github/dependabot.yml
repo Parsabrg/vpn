@@ -1,0 +1,109 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /apps/admin
+    schedule:
+      interval: weekly
+    groups:
+      admin-dependencies:
+        patterns: ["*"]
+    ignore:
+      # typescript-eslint (pulled in transitively via eslint-config-next) only
+      # supports typescript <6.1; TS jumped straight from 5.x to 7.0. Revisit
+      # once typescript-eslint/typescript-eslint#10940 ships support.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # eslint-config-next's own bundled eslint-plugin-react breaks at
+      # runtime on ESLint 10 (`contextOrFilename.getFilename is not a
+      # function`), independent of its declared peer range. Revisit once
+      # eslint-config-next bundles an ESLint-10-compatible eslint-plugin-react.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: pip
+    directory: /services/api
+    schedule:
+      interval: weekly
+    groups:
+      api-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /services/vpn-agent
+    schedule:
+      interval: weekly
+    groups:
+      agent-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /services/worker
+    schedule:
+      interval: weekly
+    groups:
+      worker-dependencies:
+        patterns: ["*"]
+
+  - package-ecosystem: pub
+    directory: /apps/mobile
+    schedule:
+      interval: weekly
+    groups:
+      mobile-dependencies:
+        patterns: ["*"]
+    ignore:
+      # The tunnel runs on a patched copy of this plugin in third_party/, not
+      # on the pub.dev release. Upgrading it means re-applying the patches in
+      # third_party_src/, which is never a version bump. Dependabot still
+      # rewrites the lock to pub.dev whenever it regenerates it, because
+      # third_party/ is gitignored; flutter.yml's patched-plugin job fails
+      # those PRs.
+      - dependency-name: "flutter_v2ray_client"
+      # Pinned exactly by the Flutter SDK: flutter_localizations requires
+      # intl 0.20.2, so a newer intl cannot resolve until Flutter itself
+      # moves it. It changes with a Flutter upgrade, not on its own.
+      - dependency-name: "intl"
+      # 0.7 and later need Dart 3.13; Flutter 3.44 ships 3.12. Lift this
+      # with the next Flutter upgrade (2026-10-23).
+      - dependency-name: "tray_manager"
+        versions: [">=0.7.0"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/api
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/vpn-agent
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /services/worker
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker
+    directory: /apps/admin
+    schedule:
+      interval: weekly
+    ignore:
+      # Stay on the Node line that is in long-term support. Dependabot proposed
+      # 26 while it was not yet LTS; 24 has security support until April 2028.
+      # Move deliberately, together with package.json's engines range and the
+      # admin.yml CI container, once the next line is LTS.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]

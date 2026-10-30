@@ -1,0 +1,6 @@
+geoip.dat (Windows and Linux builds) is the v2fly/geoip database,
+by the v2fly contributors, licensed under the Creative Commons
+Attribution-ShareAlike 4.0 International License (CC BY-SA 4.0):
+https://creativecommons.org/licenses/by-sa/4.0/
+
+It is shipped unmodified, as published with Xray-core.

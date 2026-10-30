@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The tunnel notification's small icon: the mark's silhouette at status-bar
+  size. Android draws small icons from their alpha alone, so a full-colour
+  launcher icon here turns into a blob. That is how the notification came to
+  show Flutter's logo, the old launcher icon's outline.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group
+        android:rotation="-28"
+        android:pivotX="12"
+        android:pivotY="12">
+        <path
+            android:pathData="M2,12 A10,4.4 0 1,0 22,12 A10,4.4 0 1,0 2,12 Z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="1.8" />
+    </group>
+    <path
+        android:pathData="M9,12 a3,3 0 1,0 6,0 a3,3 0 1,0 -6,0 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

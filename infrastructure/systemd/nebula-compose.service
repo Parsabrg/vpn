@@ -1,0 +1,22 @@
+[Unit]
+Description=Nebula VPN control-plane Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+# Report a failure instead of leaving it in the journal for nobody. This
+# fires only when the unit enters `failed`; crash loops and stopped timers
+# never reach that state, and nebula-healthcheck.timer covers those.
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/nebula
+EnvironmentFile=/etc/nebula/compose.env
+ExecStart=/usr/bin/docker compose -f infrastructure/compose/production.yaml --env-file /etc/nebula/compose.env up -d --wait
+ExecStop=/usr/bin/docker compose -f infrastructure/compose/production.yaml --env-file /etc/nebula/compose.env down
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,215 @@
+name: Python
+
+on:
+  pull_request:
+    paths:
+      [
+        "services/api/**",
+        "services/vpn-agent/**",
+        "services/worker/**",
+        "infrastructure/postgres/**",
+        ".github/workflows/python.yml",
+      ]
+  push:
+    branches: [main]
+    paths:
+      [
+        "services/api/**",
+        "services/vpn-agent/**",
+        "services/worker/**",
+        "infrastructure/postgres/**",
+        ".github/workflows/python.yml",
+      ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    # GitHub-hosted: the repository is public, so these are free, and no job
+    # ever runs on the project's own servers.
+    runs-on: ubuntu-latest
+    container: python:3.14.8-slim-trixie
+    services:
+      postgres:
+        image: postgres:17.11
+        env:
+          POSTGRES_DB: nebula
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-postgres-only
+        options: >-
+          --health-cmd "pg_isready -U postgres -d nebula"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:8.10.2-alpine3.23
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      POSTGRES_DB: nebula
+      POSTGRES_ADMIN_URL: postgresql://postgres:ci-postgres-only@postgres:5432/nebula
+      NEBULA_DB_APP_USER: nebula_app
+      NEBULA_DB_APP_PASSWORD: ci-app-only
+      NEBULA_DB_MIGRATOR_USER: nebula_migrator
+      NEBULA_DB_MIGRATOR_PASSWORD: ci-migrator-only
+      NEBULA_DATABASE_URL: postgresql+psycopg://nebula_app:ci-app-only@postgres:5432/nebula
+      MIGRATION_DATABASE_URL: postgresql+psycopg://nebula_migrator:ci-migrator-only@postgres:5432/nebula
+      NEBULA_REDIS_URL: redis://redis:6379/0
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # One virtualenv per service, mirroring how they are developed locally.
+      # A single shared environment cannot work: the services deliberately do
+      # not import each other, and each pins its runtime dependencies exactly,
+      # so any Dependabot bump that moves a shared pin (fastapi, uvicorn) in
+      # one service's pyproject makes pip's resolver fail outright -- which
+      # deadlocked every grouped dependency PR, since no single PR can bump
+      # the same pin in two services at once.
+      - name: Install workspaces
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            python -m venv "services/$service/.venv"
+            "services/$service/.venv/bin/python" -m pip install --upgrade pip
+            "services/$service/.venv/bin/python" -m pip install -e "./services/$service[dev]"
+          done
+      - name: Create least-privilege database roles
+        run: services/api/.venv/bin/python infrastructure/postgres/bootstrap_ci_roles.py
+      - name: Upgrade database from empty to head
+        working-directory: services/api
+        run: .venv/bin/python -m alembic upgrade head
+      - name: Verify migration metadata is current
+        working-directory: services/api
+        run: .venv/bin/python -m alembic check
+      # Audited per service now rather than once over a merged environment,
+      # so a finding names the service that actually owns the dependency.
+      - name: Audit Python dependency graphs
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            (cd "services/$service" && .venv/bin/python -m pip_audit)
+          done
+      - name: Ruff lint
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            (cd "services/$service" && .venv/bin/python -m ruff check .)
+          done
+      - name: Ruff format
+        run: |
+          set -eu
+          for service in api vpn-agent worker; do
+            (cd "services/$service" && .venv/bin/python -m ruff format --check .)
+          done
+      - name: Type check API
+        working-directory: services/api
+        run: .venv/bin/python -m mypy
+      - name: Type check VPN agent
+        working-directory: services/vpn-agent
+        run: .venv/bin/python -m mypy
+      - name: Type check worker
+        working-directory: services/worker
+        run: .venv/bin/python -m mypy
+      - name: Test API
+        working-directory: services/api
+        run: .venv/bin/python -m pytest
+      - name: Test VPN agent
+        working-directory: services/vpn-agent
+        run: .venv/bin/python -m pytest
+      - name: Test worker
+        working-directory: services/worker
+        run: .venv/bin/python -m pytest
+
+  netns-integration:
+    needs: checks
+    # Deliberately not the self-hosted runner, for two reasons: the
+    # steps below need `sudo`, which the runner's unprivileged user
+    # does not have, and they create WireGuard interfaces -- on a host
+    # that is already serving WireGuard to real users.
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install WireGuard userspace tools
+        # util-linux (for setpriv, used below to drop the netns integration
+        # test down to CAP_NET_ADMIN-only) ships on every stock Ubuntu image,
+        # but install it explicitly rather than assume it's there.
+        run: sudo apt-get update && sudo apt-get install -y wireguard-tools util-linux
+      - name: Install VPN agent
+        # ubuntu-latest's system Python is externally managed (PEP 668), so a
+        # venv is required regardless; `checks` now uses per-service venvs too,
+        # so both jobs install the agent the same way.
+        run: |
+          python3 -m venv services/vpn-agent/.venv
+          services/vpn-agent/.venv/bin/pip install -e './services/vpn-agent[dev]'
+      - name: Provision an isolated netns WireGuard interface
+        id: netns
+        run: |
+          set -eu
+          ns="nebula-ci-$$"
+
+          if ! sudo ip netns add "$ns" 2>/tmp/netns-add.log; then
+            echo "::warning::could not create a network namespace ($(cat /tmp/netns-add.log)); skipping real WireGuard integration tests"
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if ! sudo ip netns exec "$ns" ip link add wg0 type wireguard 2>/tmp/wg-add.log; then
+            echo "::warning::this runner's kernel does not support WireGuard interfaces ($(cat /tmp/wg-add.log)); skipping real WireGuard integration tests"
+            sudo ip netns del "$ns" || true
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sudo ip netns exec "$ns" ip link set lo up
+          sudo ip netns exec "$ns" ip address add 10.77.0.1/24 dev wg0
+          sudo ip netns exec "$ns" ip link set wg0 up
+
+          key_dir=$(mktemp -d)
+          umask 077
+          wg genkey > "$key_dir/server_private_key"
+          sudo ip netns exec "$ns" wg set wg0 listen-port 51820 private-key "$key_dir/server_private_key"
+          sudo chmod 0644 "$key_dir/server_private_key"
+
+          echo "available=true" >> "$GITHUB_OUTPUT"
+          echo "namespace=$ns" >> "$GITHUB_OUTPUT"
+          echo "key_file=$key_dir/server_private_key" >> "$GITHUB_OUTPUT"
+      - name: Real WireGuard netns integration tests
+        if: steps.netns.outputs.available == 'true'
+        working-directory: services/vpn-agent
+        env:
+          NEBULA_WG_NETNS_INTEGRATION: "1"
+          NEBULA_ENV: test
+          NEBULA_WG_DRIVER: native
+          NEBULA_WG_INTERFACE: wg0
+          NEBULA_WG_SERVER_ADDRESS: 10.77.0.1/24
+          NEBULA_WG_CLIENT_POOL: 10.77.0.0/24
+          NEBULA_WG_SERVER_PRIVATE_KEY_FILE: ${{ steps.netns.outputs.key_file }}
+        # Runs as the unprivileged runner user with only CAP_NET_ADMIN
+        # ambient/bounding, matching production's systemd unit
+        # (AmbientCapabilities=CAP_NET_ADMIN, CapabilityBoundingSet=CAP_NET_ADMIN,
+        # NoNewPrivileges=true) instead of the real root this job used to run
+        # pytest as. That mismatch is exactly how a real wg-quick-requires-root
+        # bug shipped to production undetected -- CI never exercised the
+        # privilege boundary that actually matters. Entering the namespace
+        # itself still needs privilege (setns), so sudo drops into it and
+        # setpriv drops root the rest of the way before pytest ever starts.
+        run: >-
+          sudo --preserve-env
+          ip netns exec ${{ steps.netns.outputs.namespace }}
+          setpriv --reuid "$(id -u)" --regid "$(id -g)" --init-groups
+          --inh-caps=+net_admin --ambient-caps=+net_admin
+          --bounding-set=-all,+net_admin --no-new-privs --
+          "${{ github.workspace }}/services/vpn-agent/.venv/bin/python3" -m pytest
+          tests/integration -m netns_integration --no-cov
+      - name: Tear down the namespace
+        if: always() && steps.netns.outputs.namespace != ''
+        run: sudo ip netns del "${{ steps.netns.outputs.namespace }}" || true

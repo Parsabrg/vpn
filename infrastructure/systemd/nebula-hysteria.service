@@ -1,0 +1,62 @@
+# Hysteria2 for Nebula, on the standalone reference implementation rather
+# than Xray-core's re-implementation of the protocol.
+#
+# Xray-core accepted the obfuscation configuration and silently discarded it:
+# a client offering a deliberately wrong Salamander password authenticated
+# successfully, so the inbound believed it was obfuscated and was not. It
+# reports the same class of problem at every startup about its bandwidth
+# fields having moved. See docs/adr/0003 and 0004.
+#
+# Config is rendered by the agent to /etc/nebula/hysteria/config.yaml, in the
+# same way it renders the Xray client list. The binary is shared with any
+# other Hysteria2 instance on the host; only the config path differs.
+#
+# Install, and the directory permissions matter:
+#
+#   install -o nebula-agent -g root -m 2750 -d /etc/nebula/hysteria
+#
+# The setgid bit is load-bearing. This service runs as root but the capability
+# set below deliberately omits CAP_DAC_OVERRIDE, so root cannot bypass file
+# permissions here -- it reads the config by group, not by being root. The
+# agent re-renders the file on every provision, and each render is a fresh
+# file; without setgid those inherit the agent's own group and the service
+# stops being able to read its own config the first time a client is added.
+# Observed exactly that: "failed to read server config: permission denied",
+# restarting on a loop, while the rendered config was perfectly valid.
+
+[Unit]
+Description=Nebula VPN Hysteria2 (standalone reference implementation)
+After=network.target
+# In [Unit], not [Service]: before systemd v229 these were accepted in
+# [Service] and the interval silently ignored, which is a trap worth not
+# re-entering (see nebula-xray.service).
+StartLimitIntervalSec=60
+StartLimitBurst=50
+
+# Report a failure instead of leaving it in the journal for nobody. This
+# fires only when the unit enters `failed`; crash loops and stopped timers
+# never reach that state, and nebula-healthcheck.timer covers those.
+OnFailure=nebula-alert@%n.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/hysteria server --config /etc/nebula/hysteria/config.yaml
+WorkingDirectory=~
+User=root
+Group=root
+Environment=HYSTERIA_LOG_LEVEL=info
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_NET_RAW
+NoNewPrivileges=true
+# Governs only the *automatic* restart after an unexpected exit, never the
+# `systemctl restart` the agent issues to apply a config -- those are
+# immediate, so raising this does not slow provisioning at all. It slows a
+# crash loop, which is the only thing it does slow. Worth doing because a bad
+# config once restarted this unit 25,126 times without anyone noticing: at 2-3
+# seconds a loop is fast enough to bury every other message in the journal
+# while looking, from outside, like a service that is merely up.
+Restart=on-failure
+RestartSec=15
+
+[Install]
+WantedBy=multi-user.target

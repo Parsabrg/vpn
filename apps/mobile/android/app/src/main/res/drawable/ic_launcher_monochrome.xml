@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 13 themed icons: the mark's silhouette, tinted by the launcher. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:rotation="-28"
+        android:pivotX="54"
+        android:pivotY="54">
+        <path
+            android:pathData="M27,54 A27,10.5 0 1,0 81,54 A27,10.5 0 1,0 27,54 Z"
+            android:strokeColor="#FFFFFFFF"
+            android:strokeWidth="3" />
+    </group>
+    <path
+        android:pathData="M45.5,54 a8.5,8.5 0 1,0 17,0 a8.5,8.5 0 1,0 -17,0 Z"
+        android:fillColor="#FFFFFFFF" />
+</vector>

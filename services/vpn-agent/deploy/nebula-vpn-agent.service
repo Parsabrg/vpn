@@ -1,0 +1,84 @@
+[Unit]
+Description=Nebula VPN agent
+After=network-online.target
+Wants=network-online.target
+# Only meaningful for a colocated deployment, where this binds the Docker
+# bridge gateway of the compose stack's backend network (see deploy/README.md)
+# -- an address that does not exist until dockerd has recreated that network's
+# bridge. Ignored on a host without Docker, which is the remote-agent case.
+After=docker.service
+
+# Report a failure instead of leaving it in the journal for nobody. This
+# fires only when the unit enters `failed`; crash loops and stopped timers
+# never reach that state, and nebula-healthcheck.timer covers those.
+OnFailure=nebula-alert@%n.service
+
+# No start-rate limit. When this binds the compose bridge gateway, a boot that
+# brings this up before dockerd has recreated the bridge fails to bind, and the
+# default limit (5 attempts in 10s) would latch the unit into `failed` for good
+# -- taking the whole control plane down over a few seconds of ordering. Retry
+# forever instead: the failure is transient by construction, and an agent that
+# is down is far more visible than one that is a few seconds late. In [Unit]:
+# systemd ignores it in [Service] ("Unknown key"), seen on a fresh install
+# 2026-10-26; production had worked around it with a drop-in.
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=nebula-agent
+Group=nebula-agent
+EnvironmentFile=/etc/nebula/agent.env
+
+# Only capability required to manage a WireGuard interface; everything else
+# is dropped by the empty-otherwise CapabilityBoundingSet.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RemoveIPC=true
+UMask=0077
+
+# Only the agent's own state/config directories are writable; secrets are
+# read-only even to this service. /etc/nebula/secrets (not /run) so secrets
+# survive a reboot -- /run is tmpfs and is wiped every boot, which would
+# otherwise strand this service without its keys until an operator manually
+# re-populated it.
+#
+# nebula/xray covers this agent's own Xray bookkeeping state
+# (xray_state_dir, default /var/lib/nebula/xray -- see settings.py); the
+# separate /etc/nebula/xray write access below is for the real Xray config
+# file this agent renders (xray_config_dir), which the nebula-xray.service
+# unit then reads read-only.
+StateDirectory=nebula/wireguard nebula/xray
+# /etc/nebula/hysteria is the standalone Hysteria2 server's config, rendered
+# from the same provisioned client set as the Xray one. ProtectSystem=strict
+# makes everything outside this list read-only, so omitting it fails the
+# apply with EROFS -- and because the apply is what the API waits on, that
+# surfaces to the user as a plain refusal with no reason attached.
+ReadWritePaths=/var/lib/nebula/wireguard /var/lib/nebula/xray /etc/nebula/xray /etc/nebula/hysteria
+ReadOnlyPaths=/etc/nebula/secrets
+
+ExecStart=/opt/nebula-vpn-agent/.venv/bin/nebula-agent-serve
+Restart=on-failure
+RestartSec=2
+# No start-rate limit. When this binds the compose bridge gateway, a boot that
+# brings this up before dockerd has recreated the bridge fails to bind, and the
+# default limit (5 attempts in 10s) would latch the unit into `failed` for good
+
+[Install]
+WantedBy=multi-user.target

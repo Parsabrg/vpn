@@ -1,0 +1,48 @@
+# Asks whether the transports are reachable from inside Iran, which is the
+# only vantage point that answers the question the users actually have.
+#
+# Every other check runs on this host and reports that the server is healthy.
+# A transport can be perfectly served and completely unusable, and from here
+# those look identical.
+#
+# Runs on its own timer rather than inside nebula-healthcheck because it is
+# slow (minutes, not seconds), depends on a third-party measurement network,
+# and reports a different kind of fact -- one whose right cadence is hourly.
+
+[Unit]
+Description=Nebula VPN reachability check from Iran
+After=network-online.target
+Wants=network-online.target
+OnFailure=nebula-alert@%n.service
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/nebula/agent.env
+ExecStart=/opt/nebula-vpn-agent/.venv/bin/nebula-agent-reachability
+
+# Runs as root to read the journal and the private TLS certificate directory.
+# It writes exactly one file, its own dedupe state.
+User=root
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+StateDirectory=nebula
+ReadWritePaths=/var/lib/nebula
+ReadOnlyPaths=/etc/nebula/secrets /etc/letsencrypt
+UMask=0077
+
+# Two measurements per TCP transport, each dispatched to probes in several
+# countries and then polled. Generous, but bounded: a run that hangs must
+# not still be going when the next hour's starts.
+TimeoutStartSec=900

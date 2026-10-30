@@ -1,0 +1,7 @@
+# Deployed by its operator, to their own Cloudflare account:
+#   npx wrangler secret put UUID      (the shared UUID the app is built with)
+#   npx wrangler deploy
+# RELAY is optional: where streams to Cloudflare-hosted sites are retried.
+name = "nebula-edge-relay"
+main = "src/index.js"
+compatibility_date = "2026-09-01"

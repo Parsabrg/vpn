@@ -1,0 +1,15 @@
+# The app builds against a patched flutter_v2ray_client: Hysteria2 does not run
+# on Xray-core, so it is served by the reference client as a child process.
+# See third_party_src/README.md and docs/adr/0003.
+#
+# `third_party/` is generated and gitignored. Run this first, or `flutter pub
+# get` will fail on a missing path -- which is the intended failure, since the
+# alternative is silently building an app whose Hysteria2 profile connects and
+# carries nothing:
+#
+#     python third_party_src/vendor_plugin.py
+dependency_overrides:
+  flutter_v2ray_client:
+    path: third_party/flutter_v2ray_client
+  flutter_secure_storage_windows:
+    path: third_party/flutter_secure_storage_windows

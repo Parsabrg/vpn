@@ -1,0 +1,8 @@
+{
+  "name": "nebula-edge-relay",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

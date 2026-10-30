@@ -1,0 +1,1623 @@
+diff --git a/android/src/main/AndroidManifest.xml b/android/src/main/AndroidManifest.xml
+index b80b020..64460a5 100644
+--- a/android/src/main/AndroidManifest.xml
++++ b/android/src/main/AndroidManifest.xml
+@@ -12,9 +12,24 @@
+         android:minSdkVersion="34" />
+ 
+     <application>
++        <!-- A foreground service type is required from Android 14, and without
++             one startForeground() throws: upstream's proxy-only mode was killed
++             within seconds on current phones for never going foreground. -->
+         <service
+             android:name="dev.amirzr.flutter_v2ray_client.v2ray.services.V2rayProxyOnlyService"
+             android:exported="false"
++            android:foregroundServiceType="specialUse"
++            android:process=":RunSoLibV2RayDaemon">
++            <property
++                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
++                android:value="proxy" />
++        </service>
++
++        <!-- The delay test runs here, in the daemon process: in the app's
++             process its Go runtime and WireGuard's crashed the app. -->
++        <service
++            android:name="dev.amirzr.flutter_v2ray_client.v2ray.services.DelayProbeService"
++            android:exported="false"
+             android:process=":RunSoLibV2RayDaemon" />
+ 
+         <service
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/FlutterV2rayPlugin.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/FlutterV2rayPlugin.java
+index 252fab4..c446450 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/FlutterV2rayPlugin.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/FlutterV2rayPlugin.java
+@@ -106,6 +106,8 @@ public class FlutterV2rayPlugin implements FlutterPlugin, ActivityAware, PluginR
+             switch (call.method) {
+                 case "startV2Ray":
+                     AppConfigs.NOTIFICATION_DISCONNECT_BUTTON_NAME = call.argument("notificationDisconnectButtonName");
++                    // Absent means an older caller: keep the speed on, as the default is.
++                    AppConfigs.NOTIFICATION_SHOW_SPEED = !Boolean.FALSE.equals(call.argument("notificationShowSpeed"));
+                     if (Boolean.TRUE.equals(call.argument("proxy_only"))) {
+                         V2rayController.changeConnectionMode(AppConfigs.V2RAY_CONNECTION_MODES.PROXY_ONLY);
+                     } else {
+@@ -132,7 +134,8 @@ public class FlutterV2rayPlugin implements FlutterPlugin, ActivityAware, PluginR
+                     executor.submit(() -> {
+                         try {
+                             result.success(
+-                                    V2rayController.getV2rayServerDelay(call.argument("config"), call.argument("url")));
++                                    V2rayController.getV2rayServerDelay(binding.getApplicationContext(),
++                                            call.argument("config"), call.argument("url")));
+                         } catch (Exception e) {
+                             result.success(-1);
+                         }
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/V2rayController.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/V2rayController.java
+index 14830fd..3b5c5be 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/V2rayController.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/V2rayController.java
+@@ -1,25 +1,199 @@
+ package dev.amirzr.flutter_v2ray_client.v2ray;
+ 
++import android.app.ActivityManager;
+ import android.content.BroadcastReceiver;
+ import android.content.Context;
+ import android.content.Intent;
+ import android.content.IntentFilter;
+ import android.os.Build;
++import android.os.Bundle;
++import android.os.ResultReceiver;
++import android.security.keystore.KeyGenParameterSpec;
++import android.security.keystore.KeyProperties;
++import android.util.Log;
+ 
+ import dev.amirzr.flutter_v2ray_client.v2ray.core.V2rayCoreManager;
++import dev.amirzr.flutter_v2ray_client.v2ray.services.DelayProbeService;
+ import dev.amirzr.flutter_v2ray_client.v2ray.services.V2rayProxyOnlyService;
+ import dev.amirzr.flutter_v2ray_client.v2ray.services.V2rayVPNService;
+ import dev.amirzr.flutter_v2ray_client.v2ray.utils.AppConfigs;
+ import dev.amirzr.flutter_v2ray_client.v2ray.utils.Utilities;
++import dev.amirzr.flutter_v2ray_client.v2ray.utils.V2rayConfig;
+ 
++import java.io.ByteArrayInputStream;
++import java.io.ByteArrayOutputStream;
++import java.io.File;
++import java.io.FileInputStream;
++import java.io.FileOutputStream;
++import java.io.ObjectInputStream;
++import java.io.ObjectOutputStream;
++import java.security.KeyStore;
+ import java.util.ArrayList;
++import java.util.Arrays;
+ import java.util.concurrent.CountDownLatch;
+ import java.util.concurrent.TimeUnit;
+ 
++import javax.crypto.Cipher;
++import javax.crypto.KeyGenerator;
++import javax.crypto.SecretKey;
++import javax.crypto.spec.GCMParameterSpec;
++
+ import libv2ray.Libv2ray;
+ 
+ public class V2rayController {
+ 
++    /**
++     * The tunnel that is running, kept so it can be started again without the
++     * app: after a reboot, after the app is updated, and when Android's
++     * Always-on VPN starts the service on its own.
++     *
++     * Written when a service starts a tunnel and deleted when it is stopped on
++     * purpose or revoked, so a saved tunnel means one that was up and was not
++     * taken down by anyone. Its client is still live on the server: clients are
++     * only revoked on disconnect or with their device.
++     *
++     * Encrypted with a key held in the Android Keystore. The config carries the
++     * client's credential, which is enough to use the server.
++     */
++    public static final class SavedTunnel {
++        private static final String KEY_ALIAS = "nebula_saved_tunnel";
++        private static final String FILE_NAME = "saved_tunnel.bin";
++
++        public final V2rayConfig config;
++        public final boolean vpn;
++
++        private SavedTunnel(V2rayConfig config, boolean vpn) {
++            this.config = config;
++            this.vpn = vpn;
++        }
++
++        public static synchronized void save(final Context context, final V2rayConfig config, final boolean vpn) {
++            try {
++                ByteArrayOutputStream plain = new ByteArrayOutputStream();
++                try (ObjectOutputStream out = new ObjectOutputStream(plain)) {
++                    out.writeBoolean(vpn);
++                    // By name: a resource id can change between builds, and the
++                    // tunnel may be restored by a newer one.
++                    String iconName = "";
++                    String iconType = "";
++                    try {
++                        iconName = context.getResources().getResourceEntryName(config.APPLICATION_ICON);
++                        iconType = context.getResources().getResourceTypeName(config.APPLICATION_ICON);
++                    } catch (Exception ignored) {
++                    }
++                    out.writeUTF(iconName);
++                    out.writeUTF(iconType);
++                    out.writeObject(config);
++                }
++                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
++                cipher.init(Cipher.ENCRYPT_MODE, key());
++                byte[] sealed = cipher.doFinal(plain.toByteArray());
++                byte[] iv = cipher.getIV();
++                File target = new File(context.getFilesDir(), FILE_NAME);
++                File temp = new File(context.getFilesDir(), FILE_NAME + ".tmp");
++                try (FileOutputStream file = new FileOutputStream(temp)) {
++                    file.write(iv.length);
++                    file.write(iv);
++                    file.write(sealed);
++                }
++                if (!temp.renameTo(target)) {
++                    target.delete();
++                    temp.renameTo(target);
++                }
++            } catch (Exception e) {
++                Log.w("SavedTunnel", "could not save the running tunnel", e);
++            }
++        }
++
++        public static synchronized SavedTunnel load(final Context context) {
++            File file = new File(context.getFilesDir(), FILE_NAME);
++            if (!file.exists()) {
++                return null;
++            }
++            try {
++                byte[] all = new byte[(int) file.length()];
++                try (FileInputStream in = new FileInputStream(file)) {
++                    int read = 0;
++                    while (read < all.length) {
++                        int n = in.read(all, read, all.length - read);
++                        if (n < 0) {
++                            break;
++                        }
++                        read += n;
++                    }
++                }
++                int ivLength = all[0];
++                byte[] iv = Arrays.copyOfRange(all, 1, 1 + ivLength);
++                byte[] sealed = Arrays.copyOfRange(all, 1 + ivLength, all.length);
++                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
++                cipher.init(Cipher.DECRYPT_MODE, key(), new GCMParameterSpec(128, iv));
++                byte[] plain = cipher.doFinal(sealed);
++                try (ObjectInputStream objects = new ObjectInputStream(new ByteArrayInputStream(plain))) {
++                    boolean vpn = objects.readBoolean();
++                    String iconName = objects.readUTF();
++                    String iconType = objects.readUTF();
++                    V2rayConfig config = (V2rayConfig) objects.readObject();
++                    int icon = iconName.isEmpty()
++                            ? 0
++                            : context.getResources().getIdentifier(iconName, iconType, context.getPackageName());
++                    config.APPLICATION_ICON = icon != 0 ? icon : context.getApplicationInfo().icon;
++                    return new SavedTunnel(config, vpn);
++                }
++            } catch (Exception e) {
++                // Unreadable is the same as nothing saved: a tunnel is never
++                // started from a config that cannot be trusted.
++                Log.w("SavedTunnel", "saved tunnel unreadable; discarding it", e);
++                file.delete();
++                return null;
++            }
++        }
++
++        public static synchronized void clear(final Context context) {
++            new File(context.getFilesDir(), FILE_NAME).delete();
++        }
++
++        private static SecretKey key() throws Exception {
++            KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
++            keyStore.load(null);
++            if (keyStore.containsAlias(KEY_ALIAS)) {
++                return (SecretKey) keyStore.getKey(KEY_ALIAS, null);
++            }
++            KeyGenerator generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore");
++            generator.init(new KeyGenParameterSpec.Builder(
++                    KEY_ALIAS, KeyProperties.PURPOSE_ENCRYPT | KeyProperties.PURPOSE_DECRYPT)
++                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
++                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
++                    .setKeySize(256)
++                    .build());
++            return generator.generateKey();
++        }
++    }
++
++    /**
++     * Starts the saved tunnel again, if there is one. Returns whether it did.
++     *
++     * [vpnAllowed] is the caller's decision about a VPN: whether consent is held
++     * and no other VPN is up. A saved local proxy needs neither.
++     */
++    public static boolean restoreSavedTunnel(final Context context, final boolean vpnAllowed) {
++        SavedTunnel saved = SavedTunnel.load(context);
++        if (saved == null || (saved.vpn && !vpnAllowed)) {
++            return false;
++        }
++        changeConnectionMode(saved.vpn
++                ? AppConfigs.V2RAY_CONNECTION_MODES.VPN_TUN
++                : AppConfigs.V2RAY_CONNECTION_MODES.PROXY_ONLY);
++        Intent start = new Intent(context, saved.vpn ? V2rayVPNService.class : V2rayProxyOnlyService.class);
++        start.putExtra("COMMAND", AppConfigs.V2RAY_SERVICE_COMMANDS.START_SERVICE);
++        start.putExtra("V2RAY_CONFIG", saved.config);
++        if (Build.VERSION.SDK_INT > Build.VERSION_CODES.N_MR1) {
++            context.startForegroundService(start);
++        } else {
++            context.startService(start);
++        }
++        return true;
++    }
++
+     public static void init(final Context context, final int app_icon, final String app_name) {
+         Utilities.copyAssets(context);
+         AppConfigs.APPLICATION_ICON = app_icon;
+@@ -42,9 +216,10 @@ public class V2rayController {
+     }
+ 
+     public static void changeConnectionMode(final AppConfigs.V2RAY_CONNECTION_MODES connection_mode) {
+-        if (getConnectionState() == AppConfigs.V2RAY_STATES.V2RAY_DISCONNECTED) {
+-            AppConfigs.V2RAY_CONNECTION_MODE = connection_mode;
+-        }
++        // Not gated on the last broadcast state any more. That state arrives
++        // asynchronously, so a start straight after a stop could keep the old
++        // mode; the app stops whatever is running before it starts.
++        AppConfigs.V2RAY_CONNECTION_MODE = connection_mode;
+     }
+ 
+     public static void StartV2ray(final Context context, final String remark, final String config,
+@@ -71,6 +246,22 @@ public class V2rayController {
+     }
+ 
+     public static void StopV2ray(final Context context) {
++        // Stop the service that is actually running, not the one the mode
++        // field names: that field lives in this process and resets when the
++        // app is reopened, while the service lives on in the daemon process.
++        boolean stopped = false;
++        for (Class<?> service : new Class<?>[] { V2rayVPNService.class, V2rayProxyOnlyService.class }) {
++            if (isServiceRunning(context, service)) {
++                Intent intent = new Intent(context, service);
++                intent.putExtra("COMMAND", AppConfigs.V2RAY_SERVICE_COMMANDS.STOP_SERVICE);
++                context.startService(intent);
++                stopped = true;
++            }
++        }
++        if (stopped) {
++            AppConfigs.V2RAY_CONFIG = null;
++            return;
++        }
+         Intent stop_intent;
+         if (AppConfigs.V2RAY_CONNECTION_MODE == AppConfigs.V2RAY_CONNECTION_MODES.PROXY_ONLY) {
+             stop_intent = new Intent(context, V2rayProxyOnlyService.class);
+@@ -84,6 +275,25 @@ public class V2rayController {
+         AppConfigs.V2RAY_CONFIG = null;
+     }
+ 
++    /** An app can still list its own services, which is all this needs. */
++    @SuppressWarnings("deprecation")
++    private static boolean isServiceRunning(final Context context, final Class<?> service) {
++        try {
++            ActivityManager manager = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
++            if (manager == null) {
++                return false;
++            }
++            for (ActivityManager.RunningServiceInfo info : manager.getRunningServices(Integer.MAX_VALUE)) {
++                if (service.getName().equals(info.service.getClassName())) {
++                    return true;
++                }
++            }
++        } catch (Exception e) {
++            // Fall back to the mode field below.
++        }
++        return false;
++    }
++
+     public static long getConnectedV2rayServerDelay(Context context) {
+         if (V2rayController.getConnectionState() != AppConfigs.V2RAY_STATES.V2RAY_CONNECTED) {
+             return -1;
+@@ -131,8 +341,37 @@ public class V2rayController {
+         return delay[0];
+     }
+ 
+-    public static long getV2rayServerDelay(final String config, final String url) {
+-        return V2rayCoreManager.getInstance().getV2rayServerDelay(config, url);
++    /**
++     * Runs the delay test in DelayProbeService, in the daemon process, and
++     * waits for its answer. Never in this (the app's) process: loading Xray's
++     * Go runtime here crashed the app as soon as WireGuard's Go backend came
++     * up in the same process. See DelayProbeService.
++     */
++    public static long getV2rayServerDelay(final Context context, final String config, final String url) {
++        final CountDownLatch done = new CountDownLatch(1);
++        final long[] delay = {-1L};
++        final ResultReceiver receiver = new ResultReceiver(null) {
++            @Override
++            protected void onReceiveResult(int resultCode, Bundle data) {
++                delay[0] = data == null ? -1L : data.getLong(DelayProbeService.RESULT_DELAY, -1L);
++                done.countDown();
++            }
++        };
++        context.startService(new Intent(context, DelayProbeService.class)
++                .putExtra(DelayProbeService.EXTRA_CONFIG, config)
++                .putExtra(DelayProbeService.EXTRA_URL, url)
++                .putExtra(DelayProbeService.EXTRA_RECEIVER, receiver));
++        try {
++            // Past the probe's own timeouts: a Hysteria2 client waiting for
++            // its port, then Xray's request.
++            if (!done.await(45, TimeUnit.SECONDS)) {
++                return -1L;
++            }
++        } catch (InterruptedException interrupted) {
++            Thread.currentThread().interrupt();
++            return -1L;
++        }
++        return delay[0];
+     }
+ 
+     public static AppConfigs.V2RAY_CONNECTION_MODES getConnectionMode() {
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/core/V2rayCoreManager.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/core/V2rayCoreManager.java
+index 98a666e..772b966 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/core/V2rayCoreManager.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/core/V2rayCoreManager.java
+@@ -13,6 +13,7 @@ import android.content.Context;
+ import android.content.Intent;
+ import android.content.pm.PackageManager;
+ import android.graphics.Color;
++import android.net.TrafficStats;
+ import android.os.Build;
+ import android.os.CountDownTimer;
+ import android.util.Log;
+@@ -31,23 +32,45 @@ import dev.amirzr.flutter_v2ray_client.v2ray.utils.V2rayConfig;
+ 
+ import org.json.JSONObject;
+ 
++import java.io.File;
++import java.io.FileOutputStream;
++import java.nio.charset.StandardCharsets;
++import java.util.Locale;
++
+ import libv2ray.CoreCallbackHandler;
+ import libv2ray.CoreController;
+ import libv2ray.Libv2ray;
+-import libv2ray.V2RayProtector;
+ 
+ public final class V2rayCoreManager {
+     private static final int NOTIFICATION_ID = 1;
+     private volatile static V2rayCoreManager INSTANCE;
+     public V2rayServicesListener v2rayServicesListener = null;
+     private CoreController coreController;
++    // Hysteria2 does not run on Xray-core. Xray accepts the Salamander
++    // obfuscation setting and silently discards it -- a client offering a
++    // deliberately wrong password authenticates -- so a server configured for
++    // obfuscation has none, and a client applying real Salamander cannot
++    // reach one that does. This runs the reference implementation as a child
++    // process exposing SOCKS5 on the same local port tun2socks already dials,
++    // exactly as libtun2socks.so is already run. See docs/adr/0003 and 0004.
++    private Process hysteriaProcess;
+     public AppConfigs.V2RAY_STATES V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_DISCONNECTED;
+     private boolean isLibV2rayCoreInitialized = false;
+     private CountDownTimer countDownTimer;
+     private int seconds, minutes, hours;
+     private long totalDownload, totalUpload, uploadSpeed, downloadSpeed;
++    private long lastStatsAt = 0;
+     private String SERVICE_DURATION = "00:00:00";
+ 
++    // Kept so the notification can be updated in place each second with the
++    // speed, rather than rebuilt from the config every tick.
++    private NotificationCompat.Builder notificationBuilder;
++    private boolean notificationShowsSpeed;
++    // Hysteria2 has no Xray core to ask for stats. The child process runs as
++    // this app, so the kernel's per-app counters stand in: the difference
++    // between one tick and the next is that second's traffic.
++    private long lastUidRx = -1, lastUidTx = -1;
++
+     public static V2rayCoreManager getInstance() {
+         if (INSTANCE == null) {
+             synchronized (V2rayCoreManager.class) {
+@@ -64,28 +87,51 @@ public final class V2rayCoreManager {
+             @RequiresApi(api = Build.VERSION_CODES.M)
+             public void onTick(long millisUntilFinished) {
+ 
++                // Rolled over at 60 and 24: at 59 and 23 every minute the
++                // session showed was 59 seconds long.
+                 seconds++;
+-                if (seconds == 59) {
++                if (seconds == 60) {
+                     minutes++;
+                     seconds = 0;
+                 }
+-                if (minutes == 59) {
++                if (minutes == 60) {
+                     minutes = 0;
+                     hours++;
+                 }
+-                if (hours == 23) {
++                if (hours == 24) {
+                     hours = 0;
+                 }
+-                if (enable_traffic_statics) {
+-                    downloadSpeed = (coreController != null ? coreController.queryStats("block", "downlink") : 0)
+-                            + (coreController != null ? coreController.queryStats("proxy", "downlink") : 0);
+-                    uploadSpeed = (coreController != null ? coreController.queryStats("block", "uplink") : 0)
+-                            + (coreController != null ? coreController.queryStats("proxy", "uplink") : 0);
+-                    totalDownload = totalDownload + downloadSpeed;
+-                    totalUpload = totalUpload + uploadSpeed;
+-                }
+                 SERVICE_DURATION = Utilities.convertIntToTwoDigit(hours) + ":" + Utilities.convertIntToTwoDigit(minutes)
+                         + ":" + Utilities.convertIntToTwoDigit(seconds);
++                // With the screen off nobody sees the notification or the
++                // app, so nothing more is done: reposting the notification
++                // every tick woke the phone about every three seconds all
++                // night (2,970 posts in 2.5 hours, measured), and asking the
++                // engine for its counters every second kept the CPU busy.
++                // The engine keeps counting until it is asked, so the totals
++                // lose nothing; the next tick with the screen on catches up.
++                final android.os.PowerManager power =
++                        (android.os.PowerManager) context.getSystemService(Context.POWER_SERVICE);
++                if (power != null && !power.isInteractive()) {
++                    return;
++                }
++                if (enable_traffic_statics) {
++                    // One read: the engine (26.9.30) hands every outbound's
++                    // counters back at once, as "tag,direction,value;", and
++                    // resets them as it does. A speed over the whole gap since
++                    // the last read, so the first one after the screen comes
++                    // back is not minutes of traffic shown as one second's.
++                    final long now = android.os.SystemClock.elapsedRealtime();
++                    final long elapsed = lastStatsAt == 0 ? 1 : Math.max(1, (now - lastStatsAt + 500) / 1000);
++                    lastStatsAt = now;
++                    final long[] speeds = readSpeeds(
++                            coreController != null ? coreController.queryAllOutboundTrafficStats() : "");
++                    totalDownload = totalDownload + speeds[0];
++                    totalUpload = totalUpload + speeds[1];
++                    downloadSpeed = speeds[0] / elapsed;
++                    uploadSpeed = speeds[1] / elapsed;
++                }
++                updateSpeedNotification(context);
+                 String packageName = context.getPackageName();
+                 Intent connection_info_intent = new Intent(packageName + ".V2RAY_CONNECTION_INFO");
+                 connection_info_intent.setPackage(packageName);
+@@ -115,16 +161,9 @@ public final class V2rayCoreManager {
+             v2rayServicesListener = (V2rayServicesListener) targetService;
+             Libv2ray.initCoreEnv(getUserAssetsPath(targetService.getApplicationContext()), "");
+ 
+-            // Register Android VPN socket protector with libv2ray (Go)
+-            Libv2ray.useProtector(new V2RayProtector() {
+-                @Override
+-                public boolean protect(long fd) {
+-                    if (v2rayServicesListener != null) {
+-                        return v2rayServicesListener.onProtect((int) fd);
+-                    }
+-                    return true;
+-                }
+-            });
++            // No socket protector: the engine no longer takes one, and none is
++            // needed -- this app is excluded from its own VPN, so the core's
++            // sockets never enter the tunnel (V2rayVPNService).
+             // Initialize controller with callback handler
+             coreController = Libv2ray.newCoreController(new CoreCallbackHandler() {
+                 @Override
+@@ -170,6 +209,7 @@ public final class V2rayCoreManager {
+             hours = 0;
+             uploadSpeed = 0;
+             downloadSpeed = 0;
++            lastStatsAt = 0;
+             totalDownload = 0;
+             totalUpload = 0;
+             Log.e(V2rayCoreManager.class.getSimpleName(), "setUpListener => new initialize from "
+@@ -192,19 +232,74 @@ public final class V2rayCoreManager {
+         if (isV2rayCoreRunning()) {
+             stopCore();
+         }
++        final String hysteriaConfig = extractHysteriaConfig(v2rayConfig.V2RAY_FULL_JSON_CONFIG);
++        if (hysteriaConfig != null) {
++            if (!startHysteria(hysteriaConfig)) {
++                return false;
++            }
++            // Go foreground first. Android kills a service that has not called
++            // startForeground() within a few seconds of being started, and
++            // waiting for the child's port here on this thread blew straight
++            // through that deadline -- the child was connected and listening,
++            // and the system destroyed the service anyway. This is the only
++            // thing that has to happen this early: it satisfies the service
++            // lifecycle, and says nothing about whether the tunnel can carry
++            // traffic yet.
++            //
++            // V2RAY_STATE stays CONNECTING (set above, at the top of this
++            // method) rather than moving to CONNECTED here. It used to move
++            // here, before the interface existed -- Flutter's status listener
++            // treats CONNECTED as "the tunnel is up" and resolves the
++            // in-progress connect() call on it (see
++            // AndroidXrayTunnelController._handleStatusChanged), so the app
++            // reported Protected while `tun0` did not exist yet and every
++            // packet left over the underlying network, unencrypted and
++            // unfiltered, for however long the interface took to come up.
++            // Reported from the field as "connects, then works a few seconds
++            // later" -- that gap was this one, and on a network already
++            // interfering with the connection, waitForLocalPort's own retries
++            // can stretch it well past instantaneous.
++            showNotification(v2rayConfig);
++
++            // The tunnel interface is normally built from Xray-core's own
++            // startup() callback, which fires inside startLoop(). This path
++            // never calls startLoop, so nothing would establish the interface
++            // or start tun2socks -- leaving a service that reports connected
++            // while traffic goes out untouched, which is worse than failing
++            // outright. Trigger it here instead, off this thread, and only
++            // once the child is actually accepting: tun2socks dials that port
++            // immediately, so bringing the interface up first would spend its
++            // early retries on a socket that cannot answer yet.
++            final int socksPort = v2rayConfig.LOCAL_SOCKS5_PORT;
++            new Thread(() -> {
++                if (!waitForLocalPort(socksPort)) {
++                    Log.e(V2rayCoreManager.class.getSimpleName(),
++                            "hysteria never listened on " + socksPort + "; tearing down");
++                    stopCore();
++                    return;
++                }
++                if (v2rayServicesListener != null) {
++                    v2rayServicesListener.startService();
++                }
++                // Only now does `tun0` exist and tun2socks have been started
++                // (V2rayVPNService.setup(), called synchronously by
++                // startService() above) -- this is the first point at which
++                // "connected" is actually true. A failure inside setup() is
++                // caught and cleaned up internally rather than thrown back
++                // here, so it is not distinguished from success by this
++                // read; the caller's own connect-attempt timeout (15s on the
++                // Flutter side) is what surfaces a stuck CONNECTING as a
++                // failure in that case, rather than this reporting a state
++                // that isn't true either way.
++                V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
++            }, "Hysteria_Bringup").start();
++            return true;
++        }
+         try {
+             if (coreController == null) {
+                 Log.e(V2rayCoreManager.class.getSimpleName(), "startCore failed => coreController is null.");
+                 return false;
+             }
+-            // Configure protector target server and IP family preference before starting
+-            // core
+-            try {
+-                String server = v2rayConfig.CONNECTED_V2RAY_SERVER_ADDRESS + ":"
+-                        + v2rayConfig.CONNECTED_V2RAY_SERVER_PORT;
+-                Libv2ray.setProtectorServer(server, false);
+-            } catch (Exception ignored) {
+-            }
+             coreController.startLoop(v2rayConfig.V2RAY_FULL_JSON_CONFIG, 0);
+             V2RAY_STATE = AppConfigs.V2RAY_STATES.V2RAY_CONNECTED;
+             if (isV2rayCoreRunning()) {
+@@ -217,7 +312,135 @@ public final class V2rayCoreManager {
+         return true;
+     }
+ 
++    /**
++     * Returns the Hysteria2 YAML carried by this config, or null for an
++     * ordinary Xray config.
++     *
++     * The config stays JSON so the rest of this plugin keeps working
++     * unchanged -- the notification parser still reads the server address
++     * and the local SOCKS port out of it -- with the YAML carried alongside
++     * under a key Xray would never look at.
++     */
++    private String extractHysteriaConfig(final String fullJsonConfig) {
++        if (fullJsonConfig == null) {
++            return null;
++        }
++        try {
++            final JSONObject json = new JSONObject(fullJsonConfig);
++            final String yaml = json.optString("nebulaHysteriaConfig", null);
++            return (yaml == null || yaml.isEmpty()) ? null : yaml;
++        } catch (Exception e) {
++            return null;
++        }
++    }
++
++    private boolean startHysteria(final String yamlConfig) {
++        stopHysteria();
++        try {
++            final Service service = v2rayServicesListener.getService();
++            final File configFile = new File(service.getFilesDir(), "hysteria.yaml");
++            try (FileOutputStream out = new FileOutputStream(configFile)) {
++                out.write(yamlConfig.getBytes(StandardCharsets.UTF_8));
++            }
++            // Readable only by this app: the file carries a live credential.
++            configFile.setReadable(false, false);
++            configFile.setReadable(true, true);
++
++            final File binary = new File(
++                    service.getApplicationInfo().nativeLibraryDir, "libhysteria.so");
++            if (!binary.exists()) {
++                Log.e(V2rayCoreManager.class.getSimpleName(),
++                        "startHysteria failed => binary missing at " + binary.getAbsolutePath());
++                return false;
++            }
++            final ProcessBuilder builder = new ProcessBuilder(
++                    binary.getAbsolutePath(), "client", "--config", configFile.getAbsolutePath(),
++                    "--disable-update-check", "--log-level", "info");
++            builder.redirectErrorStream(true);
++            builder.directory(service.getFilesDir());
++            hysteriaProcess = builder.start();
++
++            // The child writes its own diagnostics; without draining them the
++            // pipe fills and the process blocks. Forwarding them to logcat
++            // also means a failure says why, which is what made the previous
++            // silent Hysteria2 failure take so long to understand.
++            final Process started = hysteriaProcess;
++            new Thread(() -> {
++                try (java.io.BufferedReader reader = new java.io.BufferedReader(
++                        new java.io.InputStreamReader(started.getInputStream()))) {
++                    String line;
++                    while ((line = reader.readLine()) != null) {
++                        Log.i("Hysteria", line);
++                    }
++                } catch (Exception ignored) {
++                    // stream closed on shutdown
++                }
++            }, "Hysteria_Log").start();
++
++            new Thread(() -> {
++                try {
++                    final int code = started.waitFor();
++                    Log.w("Hysteria", "process exited with code " + code);
++                } catch (InterruptedException ignored) {
++                    Thread.currentThread().interrupt();
++                }
++            }, "Hysteria_Watch").start();
++
++            return true;
++        } catch (Exception e) {
++            Log.e(V2rayCoreManager.class.getSimpleName(), "startHysteria failed =>", e);
++            return false;
++        }
++    }
++
++    /**
++     * Blocks until the child process is accepting on its local SOCKS port, or
++     * gives up. Returning false is meaningful: it means the engine started but
++     * never became usable, and the caller must not bring up a tunnel that
++     * would silently drop every packet.
++     */
++    private boolean waitForLocalPort(final int port) {
++        return waitForLocalPort(hysteriaProcess, port);
++    }
++
++    private static boolean waitForLocalPort(final Process process, final int port) {
++        final long deadline = System.currentTimeMillis() + 10_000L;
++        while (System.currentTimeMillis() < deadline) {
++            if (process != null && !process.isAlive()) {
++                return false;  // died on startup; its own log says why
++            }
++            try (java.net.Socket socket = new java.net.Socket()) {
++                socket.connect(new java.net.InetSocketAddress("127.0.0.1", port), 500);
++                return true;
++            } catch (Exception notYet) {
++                try {
++                    Thread.sleep(200L);
++                } catch (InterruptedException interrupted) {
++                    Thread.currentThread().interrupt();
++                    return false;
++                }
++            }
++        }
++        return false;
++    }
++
++    private void stopHysteria() {
++        final Process process = hysteriaProcess;
++        hysteriaProcess = null;
++        if (process != null) {
++            process.destroy();
++        }
++    }
++
+     public void stopCore() {
++        // Whether this was a Hysteria2 session has to be captured before the
++        // child is killed, because stopHysteria() clears the handle and the
++        // liveness check below would then fall through to Xray -- which never
++        // ran on this path, so the teardown would be skipped and the tunnel
++        // interface would stay up with no way to remove it from the app.
++        final boolean wasHysteria = hysteriaProcess != null;
++        notificationBuilder = null;
++        stopHysteria();
+         try {
+             // Safely cancel notification - handle cases where service might be null
+             if (v2rayServicesListener != null && v2rayServicesListener.getService() != null) {
+@@ -232,14 +455,18 @@ public final class V2rayCoreManager {
+         }
+ 
+         try {
+-            if (isV2rayCoreRunning()) {
+-                if (coreController != null) {
++            if (wasHysteria || isV2rayCoreRunning()) {
++                // Only Xray has a loop to stop; on the Hysteria path the child
++                // process is already gone by this point.
++                if (!wasHysteria && coreController != null) {
+                     coreController.stopLoop();
+                 }
+-                v2rayServicesListener.stopService();
+-                Log.e(V2rayCoreManager.class.getSimpleName(), "stopCore success => v2ray core stopped.");
++                if (v2rayServicesListener != null) {
++                    v2rayServicesListener.stopService();
++                }
++                Log.i(V2rayCoreManager.class.getSimpleName(), "stopCore success => stopped.");
+             } else {
+-                Log.e(V2rayCoreManager.class.getSimpleName(), "stopCore failed => v2ray core not running.");
++                Log.w(V2rayCoreManager.class.getSimpleName(), "stopCore => nothing was running.");
+             }
+             sendDisconnectedBroadCast();
+         } catch (Exception e) {
+@@ -307,6 +534,63 @@ public final class V2rayCoreManager {
+         return "";
+     }
+ 
++    /**
++     * Puts this second's speed on the ongoing notification.
++     *
++     * Binary units and one decimal below ten, matching how the app formats
++     * bytes, so the shade and the Connect screen read the same way.
++     */
++    private void updateSpeedNotification(final Context context) {
++        final NotificationCompat.Builder builder = notificationBuilder;
++        if (builder == null || !notificationShowsSpeed
++                || V2RAY_STATE != AppConfigs.V2RAY_STATES.V2RAY_CONNECTED) {
++            return;
++        }
++        long down = downloadSpeed;
++        long up = uploadSpeed;
++        if (hysteriaProcess != null) {
++            final int uid = android.os.Process.myUid();
++            final long rx = TrafficStats.getUidRxBytes(uid);
++            final long tx = TrafficStats.getUidTxBytes(uid);
++            if (rx < 0 || tx < 0) {
++                return; // The device does not report per-app figures.
++            }
++            down = lastUidRx < 0 ? 0 : Math.max(0, rx - lastUidRx);
++            up = lastUidTx < 0 ? 0 : Math.max(0, tx - lastUidTx);
++            lastUidRx = rx;
++            lastUidTx = tx;
++        }
++        try {
++            builder.setContentText("\u2193 " + formatSpeed(down) + "   \u2191 " + formatSpeed(up));
++            final NotificationManager manager =
++                    (NotificationManager) context.getSystemService(Context.NOTIFICATION_SERVICE);
++            if (manager != null && notificationBuilder != null) {
++                manager.notify(NOTIFICATION_ID, builder.build());
++            }
++        } catch (Exception e) {
++            Log.w("V2rayCoreManager", "Failed to update the notification speed", e);
++        }
++    }
++
++    static String formatSpeed(final long bytesPerSecond) {
++        if (bytesPerSecond < 1024) {
++            return Math.max(0, bytesPerSecond) + " B/s";
++        }
++        final double value;
++        final String unit;
++        if (bytesPerSecond < 1024L * 1024) {
++            value = bytesPerSecond / 1024.0;
++            unit = "KB/s";
++        } else if (bytesPerSecond < 1024L * 1024 * 1024) {
++            value = bytesPerSecond / (1024.0 * 1024);
++            unit = "MB/s";
++        } else {
++            value = bytesPerSecond / (1024.0 * 1024 * 1024);
++            unit = "GB/s";
++        }
++        return String.format(Locale.US, value < 10 ? "%.1f %s" : "%.0f %s", value, unit);
++    }
++
+     private void showNotification(final V2rayConfig v2rayConfig) {
+         Service context = v2rayServicesListener.getService();
+         if (context == null) {
+@@ -321,20 +605,46 @@ public final class V2rayCoreManager {
+             }
+         }
+ 
+-        Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
+-        if (launchIntent != null) {
+-            launchIntent.setAction("FROM_DISCONNECT_BTN");
+-            launchIntent.setFlags(
+-                    Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+-        }
+         final int flags;
+         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+             flags = PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT;
+         } else {
+             flags = PendingIntent.FLAG_UPDATE_CURRENT;
+         }
++
++        // Tapping the notification *body* only opens the app. Tapping the
++        // Disconnect *action* opens it and asks it to disconnect. Upstream
++        // built one PendingIntent carrying FROM_DISCONNECT_BTN and handed the
++        // same one to both setContentIntent and addAction, so every tap
++        // anywhere on the notification tore the tunnel down -- reported from
++        // the field as "clicking the notification disconnects it; it should
++        // just open the app".
++        Intent openIntent = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
++        if (openIntent != null) {
++            openIntent.setFlags(
++                    Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
++        }
+         PendingIntent notificationContentPendingIntent = PendingIntent.getActivity(
+-                context, 0, launchIntent, flags);
++                context, 0, openIntent, flags);
++
++        // The disconnect route stays an activity launch rather than the
++        // stopIntent below: this app takes its tunnel down through its own
++        // state machine, which also revokes the credential on the server --
++        // stopping the service alone would leave that behind. MainActivity
++        // reads this action and hands it to Dart (`takeDisconnectRequest`).
++        Intent disconnectIntent = context.getPackageManager()
++                .getLaunchIntentForPackage(context.getPackageName());
++        if (disconnectIntent != null) {
++            disconnectIntent.setAction("FROM_DISCONNECT_BTN");
++            disconnectIntent.setFlags(
++                    Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
++        }
++        // Request code 1, not 0. Two PendingIntents the system considers
++        // equal share one registration, and FLAG_UPDATE_CURRENT would then
++        // have the second overwrite the first -- which is the shape of the
++        // bug being fixed, so it is worth not rebuilding by accident.
++        PendingIntent disconnectPendingIntent = PendingIntent.getActivity(
++                context, 1, disconnectIntent, flags);
+ 
+         String notificationChannelID = createNotificationChannelID(v2rayConfig.APPLICATION_NAME);
+ 
+@@ -357,7 +667,7 @@ public final class V2rayCoreManager {
+                     notificationChannelID)
+                     .setSmallIcon(v2rayConfig.APPLICATION_ICON)
+                     .setContentTitle(v2rayConfig.REMARK)
+-                    .addAction(0, v2rayConfig.NOTIFICATION_DISCONNECT_BUTTON_NAME, notificationContentPendingIntent)
++                    .addAction(0, v2rayConfig.NOTIFICATION_DISCONNECT_BUTTON_NAME, disconnectPendingIntent)
+                     .setPriority(NotificationCompat.PRIORITY_MIN)
+                     .setShowWhen(false)
+                     .setOnlyAlertOnce(true)
+@@ -366,6 +676,10 @@ public final class V2rayCoreManager {
+                     .setOngoing(true);
+ 
+             context.startForeground(NOTIFICATION_ID, notificationBuilder.build());
++            this.notificationBuilder = notificationBuilder;
++            this.notificationShowsSpeed = v2rayConfig.NOTIFICATION_SHOW_SPEED;
++            this.lastUidRx = -1;
++            this.lastUidTx = -1;
+         } catch (Exception e) {
+             Log.w("V2rayCoreManager", "Failed to show notification, continuing without notification", e);
+             // VPN/Proxy continues to work even if notification fails
+@@ -373,6 +687,14 @@ public final class V2rayCoreManager {
+     }
+ 
+     public boolean isV2rayCoreRunning() {
++        // In Hysteria2 mode there is no Xray core: the transport is a child
++        // process, so liveness is whether that process is still up. Callers
++        // use this to decide whether the tunnel is carrying traffic, and
++        // answering "no" here would tear down a working tunnel.
++        final Process process = hysteriaProcess;
++        if (process != null) {
++            return process.isAlive();
++        }
+         if (coreController != null) {
+             return coreController.getIsRunning();
+         }
+@@ -389,7 +711,11 @@ public final class V2rayCoreManager {
+         }
+     }
+ 
+-    public Long getV2rayServerDelay(final String config, final String url) {
++    public Long getV2rayServerDelay(final Context context, final String config, final String url) {
++        final String hysteriaYaml = extractHysteriaConfig(config);
++        if (hysteriaYaml != null) {
++            return getHysteriaServerDelay(context, config, hysteriaYaml, url);
++        }
+         try {
+             try {
+                 JSONObject config_json = new JSONObject(config);
+@@ -408,4 +734,93 @@ public final class V2rayCoreManager {
+         }
+     }
+ 
++    /**
++     * Download and upload since the last read, summed over the proxy and block
++     * outbounds as before, from "tag,direction,value;tag,direction,value;".
++     */
++    static long[] readSpeeds(final String stats) {
++        long down = 0;
++        long up = 0;
++        if (stats != null) {
++            for (String entry : stats.split(";")) {
++                final String[] parts = entry.split(",");
++                if (parts.length != 3 || !("proxy".equals(parts[0]) || "block".equals(parts[0]))) {
++                    continue;
++                }
++                try {
++                    final long value = Long.parseLong(parts[2]);
++                    if ("downlink".equals(parts[1])) {
++                        down += value;
++                    } else if ("uplink".equals(parts[1])) {
++                        up += value;
++                    }
++                } catch (NumberFormatException ignored) {
++                    // a counter this code does not know how to read
++                }
++            }
++        }
++        return new long[] {down, up};
++    }
++
++    /**
++     * Hysteria2's real delay, measured the way its connection runs: the
++     * reference client started just for the test, and Xray measuring through
++     * that client's local SOCKS port. Xray on its own would report on a
++     * connection without Salamander -- see startHysteria.
++     *
++     * The config carries the client's YAML and its port under the same key
++     * a connection uses, plus a socks outbound to that port for Xray.
++     */
++    private Long getHysteriaServerDelay(
++            final Context context, final String config, final String yaml, final String url) {
++        Process process = null;
++        File configFile = null;
++        try {
++            final JSONObject json = new JSONObject(config);
++            final int port = json.getInt("nebulaHysteriaPort");
++            json.remove("nebulaHysteriaConfig");
++            json.remove("nebulaHysteriaPort");
++            // App-private, like the connection's own: it carries a credential.
++            configFile = File.createTempFile("hysteria-probe", ".yaml", context.getCacheDir());
++            try (FileOutputStream out = new FileOutputStream(configFile)) {
++                out.write(yaml.getBytes(StandardCharsets.UTF_8));
++            }
++            final File binary = new File(
++                    context.getApplicationInfo().nativeLibraryDir, "libhysteria.so");
++            final ProcessBuilder builder = new ProcessBuilder(
++                    binary.getAbsolutePath(), "client", "--config", configFile.getAbsolutePath(),
++                    "--disable-update-check", "--log-level", "warn");
++            builder.redirectErrorStream(true);
++            builder.directory(context.getCacheDir());
++            process = builder.start();
++            final Process started = process;
++            // Drained, or a full pipe blocks the child mid-test.
++            new Thread(() -> {
++                try (java.io.BufferedReader reader = new java.io.BufferedReader(
++                        new java.io.InputStreamReader(started.getInputStream()))) {
++                    String line;
++                    while ((line = reader.readLine()) != null) {
++                        Log.i("HysteriaProbe", line);
++                    }
++                } catch (Exception ignored) {
++                    // stream closed when the probe ends
++                }
++            }, "Hysteria_Probe_Log").start();
++            if (!waitForLocalPort(process, port)) {
++                return -1L;
++            }
++            return Libv2ray.measureOutboundDelay(json.toString(), url);
++        } catch (Exception e) {
++            Log.e("getHysteriaServerDelay", e.toString());
++            return -1L;
++        } finally {
++            if (process != null) {
++                process.destroy();
++            }
++            if (configFile != null) {
++                configFile.delete();
++            }
++        }
++    }
++
+ }
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/DelayProbeService.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/DelayProbeService.java
+new file mode 100644
+index 0000000..1df187f
+--- /dev/null
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/DelayProbeService.java
+@@ -0,0 +1,73 @@
++package dev.amirzr.flutter_v2ray_client.v2ray.services;
++
++import android.app.Service;
++import android.content.Intent;
++import android.os.Bundle;
++import android.os.IBinder;
++import android.os.ResultReceiver;
++
++import java.util.concurrent.ExecutorService;
++import java.util.concurrent.Executors;
++import java.util.concurrent.atomic.AtomicInteger;
++
++import dev.amirzr.flutter_v2ray_client.v2ray.core.V2rayCoreManager;
++
++/**
++ * Runs Xray's delay test in the daemon process, beside the tunnel's own Xray,
++ * never in the app's process.
++ *
++ * Measured in the app's process, the test loaded Xray's Go runtime there; the
++ * WireGuard backend then loaded its own Go runtime into the same process, and
++ * the app died with SIGSEGV the moment WireGuard came up. Two Go runtimes in
++ * one process is not supported. Seen on a phone: test the protocols, then
++ * connect with WireGuard.
++ */
++public class DelayProbeService extends Service {
++    public static final String EXTRA_CONFIG = "config";
++    public static final String EXTRA_URL = "url";
++    public static final String EXTRA_RECEIVER = "receiver";
++    public static final String RESULT_DELAY = "delay";
++
++    private final ExecutorService executor = Executors.newCachedThreadPool();
++    private final AtomicInteger running = new AtomicInteger();
++
++    @Override
++    public IBinder onBind(Intent intent) {
++        return null;
++    }
++
++    @Override
++    public int onStartCommand(Intent intent, int flags, int startId) {
++        if (intent == null) {
++            return START_NOT_STICKY;
++        }
++        final String config = intent.getStringExtra(EXTRA_CONFIG);
++        final String url = intent.getStringExtra(EXTRA_URL);
++        final ResultReceiver receiver = intent.getParcelableExtra(EXTRA_RECEIVER);
++        running.incrementAndGet();
++        executor.submit(() -> {
++            long delay = -1L;
++            try {
++                delay = V2rayCoreManager.getInstance().getV2rayServerDelay(this, config, url);
++            } catch (Exception ignored) {
++                // -1 is the answer for anything that did not come back.
++            } finally {
++                if (receiver != null) {
++                    final Bundle data = new Bundle();
++                    data.putLong(RESULT_DELAY, delay);
++                    receiver.send(0, data);
++                }
++                if (running.decrementAndGet() == 0) {
++                    stopSelf();
++                }
++            }
++        });
++        return START_NOT_STICKY;
++    }
++
++    @Override
++    public void onDestroy() {
++        executor.shutdown();
++        super.onDestroy();
++    }
++}
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/TProxyService.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/TProxyService.java
+new file mode 100644
+index 0000000..9c170f2
+--- /dev/null
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/TProxyService.java
+@@ -0,0 +1,28 @@
++package dev.amirzr.flutter_v2ray_client.v2ray.services;
++
++/**
++ * hev-socks5-tunnel, the bridge from the VPN interface to the engine's local
++ * SOCKS5 proxy. It runs in this process on its own thread; these are its JNI
++ * entry points, registered by the library against this class's name (built
++ * with PKGNAME/CLSNAME set to it -- see third_party_src/vendor_plugin.py).
++ *
++ * It replaced badvpn's tun2socks, which v2rayNG had also dropped: after a
++ * long session the tunnel read "connected" and carried nothing, while the
++ * same server kept working in v2rayNG on hev.
++ */
++public final class TProxyService {
++    static {
++        System.loadLibrary("hev-socks5-tunnel");
++    }
++
++    private TProxyService() {
++    }
++
++    public static native boolean TProxyStartService(String configPath, int fd);
++
++    public static native boolean TProxyStopService();
++
++    public static native boolean TProxyIsRunning();
++
++    public static native long[] TProxyGetStats();
++}
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayProxyOnlyService.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayProxyOnlyService.java
+index d6cc5c6..a2902aa 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayProxyOnlyService.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayProxyOnlyService.java
+@@ -7,6 +7,7 @@ import android.util.Log;
+ 
+ import androidx.annotation.Nullable;
+ 
++import dev.amirzr.flutter_v2ray_client.v2ray.V2rayController;
+ import dev.amirzr.flutter_v2ray_client.v2ray.core.V2rayCoreManager;
+ import dev.amirzr.flutter_v2ray_client.v2ray.interfaces.V2rayServicesListener;
+ import dev.amirzr.flutter_v2ray_client.v2ray.utils.AppConfigs;
+@@ -51,12 +52,14 @@ public class V2rayProxyOnlyService extends Service implements V2rayServicesListe
+             }
+             if (V2rayCoreManager.getInstance().startCore(v2rayConfig)) {
+                 Log.i("V2rayProxyOnlyService", "onStartCommand success => v2ray core started.");
++                V2rayController.SavedTunnel.save(this, v2rayConfig, false);
+             } else {
+                 Log.e("V2rayProxyOnlyService", "Failed to start v2ray core");
+                 this.onDestroy();
+                 return START_NOT_STICKY;
+             }
+         } else if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.STOP_SERVICE)) {
++            V2rayController.SavedTunnel.clear(this);
+             V2rayCoreManager.getInstance().stopCore();
+             AppConfigs.V2RAY_CONFIG = null;
+         } else if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.MEASURE_DELAY)) {
+@@ -81,6 +84,13 @@ public class V2rayProxyOnlyService extends Service implements V2rayServicesListe
+ 
+     @Override
+     public void onDestroy() {
++        // Upstream left the core running when this service went away, which
++        // leaves a proxy nothing holds the process up for. Only when the core is
++        // this service's: the VPN service shares the same engine.
++        V2rayCoreManager manager = V2rayCoreManager.getInstance();
++        if (manager.v2rayServicesListener == this && manager.isV2rayCoreRunning()) {
++            manager.stopCore();
++        }
+         super.onDestroy();
+     }
+ 
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayVPNService.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayVPNService.java
+index 0747e40..ffc5983 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayVPNService.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/services/V2rayVPNService.java
+@@ -2,13 +2,12 @@ package dev.amirzr.flutter_v2ray_client.v2ray.services;
+ 
+ import android.app.Service;
+ import android.content.Intent;
+-import android.net.LocalSocket;
+-import android.net.LocalSocketAddress;
+ import android.net.VpnService;
+ import android.os.Build;
+ import android.os.ParcelFileDescriptor;
+ import android.util.Log;
+ 
++import dev.amirzr.flutter_v2ray_client.v2ray.V2rayController;
+ import dev.amirzr.flutter_v2ray_client.v2ray.core.V2rayCoreManager;
+ import dev.amirzr.flutter_v2ray_client.v2ray.interfaces.V2rayServicesListener;
+ import dev.amirzr.flutter_v2ray_client.v2ray.utils.AppConfigs;
+@@ -19,16 +18,14 @@ import org.json.JSONException;
+ import org.json.JSONObject;
+ 
+ import java.io.File;
+-import java.io.FileDescriptor;
+-import java.io.OutputStream;
+-import java.util.ArrayList;
+-import java.util.Arrays;
++import java.io.FileOutputStream;
++import java.nio.charset.StandardCharsets;
+ 
+ public class V2rayVPNService extends VpnService implements V2rayServicesListener {
+     private ParcelFileDescriptor mInterface;
+-    private Process process;
+     private V2rayConfig v2rayConfig;
+     private boolean isRunning = true;
++    private Thread tun2socksWatch;
+ 
+     @Override
+     public void onCreate() {
+@@ -38,25 +35,31 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+ 
+     @Override
+     public int onStartCommand(Intent intent, int flags, int startId) {
+-        // Handle null intent case - can happen when service is restarted by system
+-        if (intent == null) {
+-            Log.w("V2rayVPNService", "onStartCommand called with null intent, stopping service");
+-            this.onDestroy();
+-            return START_NOT_STICKY;
+-        }
++        AppConfigs.V2RAY_SERVICE_COMMANDS startCommand = intent == null
++                ? null
++                : (AppConfigs.V2RAY_SERVICE_COMMANDS) intent.getSerializableExtra("COMMAND");
+ 
+-        AppConfigs.V2RAY_SERVICE_COMMANDS startCommand = (AppConfigs.V2RAY_SERVICE_COMMANDS) intent
+-                .getSerializableExtra("COMMAND");
+-
+-        // Handle null command case
++        // No command: the system is starting the service on its own -- Always-on
++        // VPN at boot, or a restart after the process was killed. Upstream stopped
++        // here, so Always-on VPN with "block connections without VPN" left the
++        // phone with no connection at all. Start the saved tunnel instead, if a
++        // tunnel was up.
++        V2rayConfig restored = null;
+         if (startCommand == null) {
+-            Log.w("V2rayVPNService", "No command found in intent, stopping service");
+-            this.onDestroy();
+-            return START_NOT_STICKY;
++            V2rayController.SavedTunnel saved = V2rayController.SavedTunnel.load(this);
++            if (saved == null || !saved.vpn) {
++                Log.w("V2rayVPNService", "started without a command and nothing saved; stopping");
++                this.onDestroy();
++                return START_NOT_STICKY;
++            }
++            restored = saved.config;
++            startCommand = AppConfigs.V2RAY_SERVICE_COMMANDS.START_SERVICE;
+         }
+ 
+         if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.START_SERVICE)) {
+-            v2rayConfig = (V2rayConfig) intent.getSerializableExtra("V2RAY_CONFIG");
++            v2rayConfig = restored != null
++                    ? restored
++                    : (V2rayConfig) intent.getSerializableExtra("V2RAY_CONFIG");
+             if (v2rayConfig == null) {
+                 Log.w("V2rayVPNService", "V2RAY_CONFIG is null, cannot start service");
+                 this.onDestroy();
+@@ -67,12 +70,15 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+             }
+             if (V2rayCoreManager.getInstance().startCore(v2rayConfig)) {
+                 Log.i("V2rayVPNService", "onStartCommand success => v2ray core started.");
++                V2rayController.SavedTunnel.save(this, v2rayConfig, true);
+             } else {
+                 Log.e("V2rayVPNService", "Failed to start v2ray core");
+                 this.onDestroy();
+                 return START_NOT_STICKY;
+             }
+         } else if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.STOP_SERVICE)) {
++            // Taken down on purpose: nothing to bring back after a restart.
++            V2rayController.SavedTunnel.clear(this);
+             V2rayCoreManager.getInstance().stopCore();
+             AppConfigs.V2RAY_CONFIG = null;
+         } else if (startCommand.equals(AppConfigs.V2RAY_SERVICE_COMMANDS.MEASURE_DELAY)) {
+@@ -98,9 +104,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+     private void stopAllProcess() {
+         stopForeground(true);
+         isRunning = false;
+-        if (process != null) {
+-            process.destroy();
+-        }
++        stopTun2socks();
+         V2rayCoreManager.getInstance().stopCore();
+         try {
+             stopSelf();
+@@ -138,6 +142,19 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+                 }
+             }
+         }
++        // Keep our own traffic out of our own tunnel. Without this the core's
++        // outbound socket to the VPN server is captured by the interface it is
++        // trying to feed, so it only works if something protects that socket by
++        // hand -- which is what the legacy protector did, and what it fails to
++        // do for a UDP transport. Excluding the package makes the exemption a
++        // routing fact that holds for every engine, including a child process,
++        // whose sockets cannot be protected from this process at all.
++        // v2rayNG does the same (CoreVpnService: addDisallowedApplication).
++        try {
++            builder.addDisallowedApplication(getPackageName());
++        } catch (Exception e) {
++            Log.w("V2rayVPNService", "could not exclude self from tunnel", e);
++        }
+         if (v2rayConfig.BLOCKED_APPS != null) {
+             for (int i = 0; i < v2rayConfig.BLOCKED_APPS.size(); i++) {
+                 try {
+@@ -192,6 +209,7 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+         try {
+             mInterface = builder.establish();
+             isRunning = true;
++            recordKillSwitch();
+             runTun2socks();
+         } catch (Exception e) {
+             Log.e("VPN_SERVICE", "Failed to establish VPN interface", e);
+@@ -200,68 +218,107 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+ 
+     }
+ 
++    /**
++     * Writes Android's always-on and block-without-VPN switches for this app
++     * where the app's screen can read them. Only a running VpnService can
++     * ask (isAlwaysOn, isLockdownEnabled): the system setting reads back
++     * empty to an app, and the settings screen said "off" over both switches
++     * on. Asked again every few seconds while the tunnel runs, because
++     * Android does not restart the service when they change.
++     */
++    private void recordKillSwitch() {
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
++            return;
++        }
++        try (FileOutputStream out = new FileOutputStream(new File(getFilesDir(), "vpn_kill_switch"))) {
++            out.write(((isAlwaysOn() ? "1" : "0") + (isLockdownEnabled() ? "1" : "0"))
++                    .getBytes(StandardCharsets.US_ASCII));
++        } catch (Exception e) {
++            Log.w("V2rayVPNService", "could not record the kill switch state", e);
++        }
++    }
++
++    /**
++     * Starts hev-socks5-tunnel on the interface just established, pointed at
++     * the engine's local proxy. Stopped first: setup() can run again over a
++     * live tunnel, and hev refuses a second start while one runs.
++     */
+     private void runTun2socks() {
+-        ArrayList<String> cmd = new ArrayList<>(
+-                Arrays.asList(new File(getApplicationInfo().nativeLibraryDir, "libtun2socks.so").getAbsolutePath(),
+-                        "--netif-ipaddr", "26.26.26.2",
+-                        "--netif-netmask", "255.255.255.252",
+-                        "--socks-server-addr", "127.0.0.1:" + v2rayConfig.LOCAL_SOCKS5_PORT,
+-                        "--tunmtu", "1500",
+-                        "--sock-path", "sock_path",
+-                        "--enable-udprelay",
+-                        "--loglevel", "error"));
++        stopTun2socks();
++        StringBuilder yaml = new StringBuilder()
++                .append("tunnel:\n")
++                .append("  mtu: 1500\n")
++                .append("socks5:\n")
++                .append("  port: ").append(v2rayConfig.LOCAL_SOCKS5_PORT).append("\n")
++                .append("  address: 127.0.0.1\n")
++                // Standard SOCKS5 UDP ASSOCIATE, logged in like the TCP side;
++                // DNS from every app arrives this way.
++                .append("  udp: 'udp'\n");
++        // The local proxy only answers to these. Written to this app's private
++        // files directory, which no other app can read, and never logged.
++        if (v2rayConfig.LOCAL_SOCKS5_USERNAME != null && v2rayConfig.LOCAL_SOCKS5_PASSWORD != null) {
++            yaml.append("  username: '").append(v2rayConfig.LOCAL_SOCKS5_USERNAME).append("'\n")
++                    .append("  password: '").append(v2rayConfig.LOCAL_SOCKS5_PASSWORD).append("'\n");
++        }
++        yaml.append("misc:\n")
++                .append("  task-stack-size: 81920\n")
++                .append("  log-level: warn\n");
+         try {
+-            ProcessBuilder processBuilder = new ProcessBuilder(cmd);
+-            processBuilder.redirectErrorStream(true);
+-            process = processBuilder.directory(getApplicationContext().getFilesDir()).start();
+-            new Thread(() -> {
+-                try {
+-                    process.waitFor();
+-                    if (isRunning) {
+-                        runTun2socks();
+-                    }
+-                } catch (InterruptedException e) {
+-                    // ignore
+-                }
+-            }, "Tun2socks_Thread").start();
+-            sendFileDescriptor();
++            File config = new File(getFilesDir(), "hev-socks5-tunnel.yaml");
++            try (FileOutputStream out = new FileOutputStream(config)) {
++                out.write(yaml.toString().getBytes(StandardCharsets.UTF_8));
++            }
++            if (!TProxyService.TProxyStartService(config.getAbsolutePath(), mInterface.getFd())) {
++                throw new IllegalStateException("hev-socks5-tunnel did not start");
++            }
++            watchTun2socks();
+         } catch (Exception e) {
+             Log.e("VPN_SERVICE", "FAILED=>", e);
+             this.onDestroy();
+         }
+     }
+ 
+-    private void sendFileDescriptor() {
+-        String localSocksFile = new File(getApplicationContext().getFilesDir(), "sock_path").getAbsolutePath();
+-        FileDescriptor tunFd = mInterface.getFileDescriptor();
+-        new Thread(() -> {
+-            int tries = 0;
+-            while (true) {
++    /**
++     * Starts hev-socks5-tunnel again if it stops while the tunnel is up, as
++     * upstream did for badvpn's process. Without it the interface would stay
++     * up with nothing reading it: every app offline under a VPN that reads
++     * connected.
++     */
++    private synchronized void watchTun2socks() {
++        if (tun2socksWatch != null && tun2socksWatch.isAlive()) {
++            return;
++        }
++        tun2socksWatch = new Thread(() -> {
++            while (isRunning) {
+                 try {
+-                    Thread.sleep(50L * tries);
+-                    LocalSocket clientLocalSocket = new LocalSocket();
+-                    clientLocalSocket
+-                            .connect(new LocalSocketAddress(localSocksFile, LocalSocketAddress.Namespace.FILESYSTEM));
+-                    if (!clientLocalSocket.isConnected()) {
+-                        Log.e("SOCK_FILE", "Unable to connect to localSocksFile [" + localSocksFile + "]");
+-                    } else {
+-                        Log.e("SOCK_FILE", "connected to sock file [" + localSocksFile + "]");
+-                    }
+-                    OutputStream clientOutStream = clientLocalSocket.getOutputStream();
+-                    clientLocalSocket.setFileDescriptorsForSend(new FileDescriptor[] { tunFd });
+-                    clientOutStream.write(32);
+-                    clientLocalSocket.setFileDescriptorsForSend(null);
+-                    clientLocalSocket.shutdownOutput();
+-                    clientLocalSocket.close();
+-                    break;
+-                } catch (Exception e) {
+-                    Log.e(V2rayVPNService.class.getSimpleName(), "sendFd failed =>", e);
+-                    if (tries > 5)
+-                        break;
+-                    tries += 1;
++                    Thread.sleep(5000);
++                } catch (InterruptedException e) {
++                    return;
++                }
++                if (isRunning && mInterface != null && !TProxyService.TProxyIsRunning()) {
++                    Log.w("V2rayVPNService", "hev-socks5-tunnel stopped; starting it again");
++                    runTun2socks();
++                }
++                // Only for the screen, so not with it off; the next reading
++                // with it on is at most five seconds away.
++                final android.os.PowerManager power =
++                        (android.os.PowerManager) getSystemService(POWER_SERVICE);
++                if (isRunning && (power == null || power.isInteractive())) {
++                    recordKillSwitch();
+                 }
+             }
+-        }, "sendFd_Thread").start();
++        }, "Tun2socks_Watch");
++        tun2socksWatch.start();
++    }
++
++    private void stopTun2socks() {
++        try {
++            if (TProxyService.TProxyIsRunning()) {
++                TProxyService.TProxyStopService();
++            }
++        } catch (Throwable e) {
++            Log.e("V2rayVPNService", "Error stopping hev-socks5-tunnel", e);
++        }
+     }
+ 
+     @Override
+@@ -285,15 +342,8 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+             Log.e("V2rayVPNService", "Error stopping foreground in onDestroy", e);
+         }
+         
+-        // Destroy tun2socks process
+-        try {
+-            if (process != null) {
+-                process.destroy();
+-                process = null;
+-            }
+-        } catch (Exception e) {
+-            Log.e("V2rayVPNService", "Error destroying process in onDestroy", e);
+-        }
++        // Stop hev-socks5-tunnel before its interface is closed under it.
++        stopTun2socks();
+         
+         // Close VPN interface
+         try {
+@@ -310,6 +360,9 @@ public class V2rayVPNService extends VpnService implements V2rayServicesListener
+ 
+     @Override
+     public void onRevoke() {
++        // Disconnected from Android's settings, or replaced by another VPN app:
++        // either way a reboot must not bring this tunnel back.
++        V2rayController.SavedTunnel.clear(this);
+         stopAllProcess();
+     }
+ 
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/AppConfigs.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/AppConfigs.java
+index 93ab730..6553b29 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/AppConfigs.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/AppConfigs.java
+@@ -10,6 +10,7 @@ public class AppConfigs {
+     public static boolean ENABLE_TRAFFIC_AND_SPEED_STATICS = true;
+     public static String DELAY_URL;
+     public static String NOTIFICATION_DISCONNECT_BUTTON_NAME;
++    public static boolean NOTIFICATION_SHOW_SPEED = true;
+ 
+     public enum V2RAY_SERVICE_COMMANDS {
+         START_SERVICE,
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/Utilities.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/Utilities.java
+index 7a668ee..799cce3 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/Utilities.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/Utilities.java
+@@ -68,6 +68,7 @@ public class Utilities {
+         v2rayConfig.APPLICATION_ICON = AppConfigs.APPLICATION_ICON;
+         v2rayConfig.APPLICATION_NAME = AppConfigs.APPLICATION_NAME;
+         v2rayConfig.NOTIFICATION_DISCONNECT_BUTTON_NAME = AppConfigs.NOTIFICATION_DISCONNECT_BUTTON_NAME;
++        v2rayConfig.NOTIFICATION_SHOW_SPEED = AppConfigs.NOTIFICATION_SHOW_SPEED;
+         try {
+             JSONObject config_json = new JSONObject(config);
+             try {
+@@ -76,6 +77,12 @@ public class Utilities {
+                     try {
+                         if (inbounds.getJSONObject(i).getString("protocol").equals("socks")) {
+                             v2rayConfig.LOCAL_SOCKS5_PORT = inbounds.getJSONObject(i).getInt("port");
++                            JSONObject socksSettings = inbounds.getJSONObject(i).optJSONObject("settings");
++                            JSONArray accounts = socksSettings == null ? null : socksSettings.optJSONArray("accounts");
++                            if (accounts != null && accounts.length() > 0) {
++                                v2rayConfig.LOCAL_SOCKS5_USERNAME = accounts.getJSONObject(0).optString("user", null);
++                                v2rayConfig.LOCAL_SOCKS5_PASSWORD = accounts.getJSONObject(0).optString("pass", null);
++                            }
+                         }
+                     } catch (Exception e) {
+                         //ignore
+diff --git a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/V2rayConfig.java b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/V2rayConfig.java
+index f7db76b..8313feb 100644
+--- a/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/V2rayConfig.java
++++ b/android/src/main/java/dev/amirzr/flutter_v2ray_client/v2ray/utils/V2rayConfig.java
+@@ -4,10 +4,19 @@ import java.io.Serializable;
+ import java.util.ArrayList;
+ 
+ public class V2rayConfig implements Serializable {
++    // Fixed, because a config is now also written to disk and read back by a
++    // later build (see V2rayController.SavedTunnel). Without it, any change
++    // to this class would make every saved tunnel unreadable after an update.
++    private static final long serialVersionUID = 1L;
++
+ 
+     public String CONNECTED_V2RAY_SERVER_ADDRESS = "";
+     public String CONNECTED_V2RAY_SERVER_PORT = "";
+     public int LOCAL_SOCKS5_PORT = 10808;
++    // Read from the socks inbound's accounts. The inbound refuses anyone
++    // without them, so tun2socks has to present them too.
++    public String LOCAL_SOCKS5_USERNAME = null;
++    public String LOCAL_SOCKS5_PASSWORD = null;
+     public int LOCAL_HTTP_PORT = 10809;
+     public ArrayList<String> BLOCKED_APPS = null;
+     public ArrayList<String> BYPASS_SUBNETS = null;
+@@ -16,5 +25,8 @@ public class V2rayConfig implements Serializable {
+     public String REMARK = "";
+     public String APPLICATION_NAME;
+     public String NOTIFICATION_DISCONNECT_BUTTON_NAME;
++    // The service runs in its own process, so this travels in the config
++    // rather than being read from AppConfigs over there.
++    public boolean NOTIFICATION_SHOW_SPEED = true;
+     public int APPLICATION_ICON;
+ }
+diff --git a/lib/flutter_v2ray.dart b/lib/flutter_v2ray.dart
+index 1cc9634..cef26ea 100644
+--- a/lib/flutter_v2ray.dart
++++ b/lib/flutter_v2ray.dart
+@@ -58,6 +58,7 @@ class V2ray {
+   /// [bypassSubnets] is an optional list of subnets to bypass the VPN.
+   /// [proxyOnly] is a boolean indicating whether to run in proxy-only mode.
+   /// [notificationDisconnectButtonName] is the text for the disconnect button in notifications.
++  /// [notificationShowSpeed] shows the live download and upload speed in the notification.
+   /// Throws an [ArgumentError] if the config is not valid JSON.
+   /// Returns a [Future] that completes when the service starts.
+   Future<void> startV2Ray({
+@@ -67,6 +68,7 @@ class V2ray {
+     List<String>? bypassSubnets,
+     bool proxyOnly = false,
+     String notificationDisconnectButtonName = 'DISCONNECT',
++    bool notificationShowSpeed = true,
+   }) async {
+     try {
+       if (jsonDecode(config) == null) {
+@@ -83,6 +85,7 @@ class V2ray {
+       proxyOnly: proxyOnly,
+       bypassSubnets: bypassSubnets,
+       notificationDisconnectButtonName: notificationDisconnectButtonName,
++      notificationShowSpeed: notificationShowSpeed,
+     );
+   }
+ 
+diff --git a/lib/flutter_v2ray_method_channel.dart b/lib/flutter_v2ray_method_channel.dart
+index f3b8985..af4eb31 100644
+--- a/lib/flutter_v2ray_method_channel.dart
++++ b/lib/flutter_v2ray_method_channel.dart
+@@ -48,6 +48,7 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
+     List<String>? blockedApps,
+     List<String>? bypassSubnets,
+     bool proxyOnly = false,
++    bool notificationShowSpeed = true,
+   }) async {
+     await methodChannel.invokeMethod('startV2Ray', {
+       'remark': remark,
+@@ -56,6 +57,7 @@ class MethodChannelFlutterV2ray extends FlutterV2rayPlatform {
+       'bypass_subnets': bypassSubnets,
+       'proxy_only': proxyOnly,
+       'notificationDisconnectButtonName': notificationDisconnectButtonName,
++      'notificationShowSpeed': notificationShowSpeed,
+     });
+   }
+ 
+diff --git a/lib/flutter_v2ray_platform_interface.dart b/lib/flutter_v2ray_platform_interface.dart
+index 9868f41..0974596 100644
+--- a/lib/flutter_v2ray_platform_interface.dart
++++ b/lib/flutter_v2ray_platform_interface.dart
+@@ -64,6 +64,7 @@ abstract class FlutterV2rayPlatform extends PlatformInterface {
+     List<String>? blockedApps,
+     List<String>? bypassSubnets,
+     bool proxyOnly = false,
++    bool notificationShowSpeed = true,
+   }) {
+     throw UnimplementedError('startV2Ray() has not been implemented.');
+   }
