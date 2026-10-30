@@ -75,6 +75,14 @@ server and says the network may be blocking WireGuard.
 
 ## Server gap: `wg1` traffic is not allowed to leave (fixed 2026-09-17)
 
+`install.sh` does this itself since 2026-10-30, for every new or rerun
+install: IPv4 forwarding in `/etc/sysctl.d/99-nebula-forward.conf`, the
+masquerade for `10.77.0.0/24` and the client restrictions (not each other,
+not this host, not private, Docker or metadata ranges) in ufw's
+`before.rules` under a `nebula-wireguard` marker, and
+`ufw route allow in on wg0 out on <outgoing interface>`. The steps below are
+how the first server was fixed by hand, before that.
+
 Found in the same session, and independent of the block: on a network that
 does let WireGuard through, the handshake would complete and traffic would
 still go nowhere. The rules below were applied on 2026-09-17 and checked
