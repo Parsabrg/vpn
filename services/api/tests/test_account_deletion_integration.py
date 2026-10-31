@@ -125,8 +125,9 @@ def test_deleting_an_account_leaves_nothing_that_names_the_person() -> None:
         await execute(
             """insert into email_deliveries (id, deduplication_key, template_code,
                                              recipient_address, subject_kind, subject_id, state,
-                                             attempt_count, available_at)
-               values (:id, :dedup, 'user_activation', :email, 'user', :user, 'sent', 1, :now)""",
+                                             attempt_count, available_at, sent_at)
+               values (:id, :dedup, 'user_activation', :email, 'user', :user, 'sent', 1, :now,
+                       :now)""",
             id=uuid4(),
             dedup=uuid4(),
             email=email,
