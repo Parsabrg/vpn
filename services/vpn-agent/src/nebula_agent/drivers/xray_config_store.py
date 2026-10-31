@@ -333,10 +333,12 @@ def render_xray_server_config(
             # per connection, and YouTube ties a video's stream to the
             # address that asked for the page -- with this host on both,
             # videos opened and never played (seen on the phone 2026-10-17).
+            # In sockopt: Xray 26.10 deprecates freedom's own domainStrategy
+            # and moves it there itself, so this is the same behaviour.
             {
                 "tag": _INTERNET_TAG,
                 "protocol": "freedom",
-                "settings": {"domainStrategy": "UseIPv4"},
+                "streamSettings": {"sockopt": {"domainStrategy": "UseIPv4"}},
             },
             {"tag": _BLOCKED_TAG, "protocol": "blackhole"},
             # Every connection it takes goes to the resolver and nowhere

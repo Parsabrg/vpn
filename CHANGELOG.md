@@ -15,6 +15,8 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- The agent's Xray config sets the outbound's IPv4-only resolving in `sockopt`, where
+  Xray 26.10 wants it (no deprecation warning; same behaviour).
 - `infrastructure/check-protocols.py` proves every protocol a server offers carries
   traffic; the install test runs it after every fresh install.
 - Enrolment sends the server's WireGuard range: before, no enrolled server had one,
