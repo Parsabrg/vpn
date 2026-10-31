@@ -111,6 +111,9 @@ already set up. To update, `sudo ./install.sh --update` moves the checkout to
 the newest release tag (never backwards, never over local changes), lists what
 changed, and reruns from it; `--update v0.1.34` picks a release.
 [CHANGELOG.md](CHANGELOG.md) says what each release changed.
+To check that every protocol the server offers carries traffic, run
+`sudo python3 infrastructure/check-protocols.py`: it connects through each one
+the way the app does and fetches a page.
 
 - **Server inside Iran:** PyPI's download host is unreachable there. The
   installer notices and asks for an HTTP proxy for the build. Pick a domain

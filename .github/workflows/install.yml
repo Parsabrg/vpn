@@ -3,14 +3,16 @@ name: Install
 # install.sh on a fresh Ubuntu machine: a new install, then a rerun that must
 # leave the configuration and every secret as they were. GitHub's runner is a
 # whole VM (systemd, root, Docker); the certificate is self-signed and the
-# names point here through /etc/hosts, so nothing outside is needed. --join
-# needs a second machine and is not run here.
+# names point here through /etc/hosts, so nothing outside is needed. Every
+# protocol the server offers then has to carry traffic. --join needs a second
+# machine and is not run here.
 on:
   pull_request:
     paths:
       - "install.sh"
       - "infrastructure/**"
       - "services/vpn-agent/**"
+      - "services/api/**"
       - "**/*.sh"
       - ".github/workflows/install.yml"
   push:
@@ -19,6 +21,7 @@ on:
       - "install.sh"
       - "infrastructure/**"
       - "services/vpn-agent/**"
+      - "services/api/**"
       - "**/*.sh"
       - ".github/workflows/install.yml"
   workflow_dispatch:
@@ -99,6 +102,12 @@ jobs:
           code=$(curl -sS --cacert /etc/letsencrypt/live/panel.$NEBULA_DOMAIN/fullchain.pem -o /dev/null -w '%{http_code}' \
             --resolve api.$NEBULA_DOMAIN:8444:127.0.0.1 https://api.$NEBULA_DOMAIN:8444/metrics)
           echo "metrics from outside: $code"; [ "$code" = 404 ]
+      - name: Every protocol carries traffic
+        # A credential per offered protocol through the agent, as when a device
+        # connects, then a page fetched through the app's own client config.
+        # WireGuard once had no address range on an enrolled server and carried
+        # nothing while every service looked healthy (2026-10-31).
+        run: sudo python3 infrastructure/check-protocols.py
       - name: Admin allowlist closes the panel and admin API, not the app's API
         run: |
           set -eu
