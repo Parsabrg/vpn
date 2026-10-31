@@ -1,20 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_riverpod/misc.dart' show Override;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:nebula_mobile/core/auth/auth_notifier.dart';
 import 'package:nebula_mobile/core/auth/auth_repository.dart';
+import 'package:nebula_mobile/core/auth/auth_state.dart';
+import 'package:nebula_mobile/core/network/api_exception.dart';
 import 'package:nebula_mobile/core/routing/route_paths.dart';
 import 'package:nebula_mobile/core/storage/device_id_store.dart';
 import 'package:nebula_mobile/core/storage/secure_token_store.dart';
 import 'package:nebula_mobile/core/storage/storage_providers.dart';
+import 'package:nebula_mobile/core/widgets/password_field.dart';
 import 'package:nebula_mobile/features/account_request/account_request_screen.dart';
 import 'package:nebula_mobile/features/auth/sign_in_screen.dart';
 import 'package:nebula_mobile/l10n/app_localizations.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/auth/fake_auth_repository.dart';
 
-Widget _harness(FakeAuthRepository repository) {
+Widget _harness(
+  FakeAuthRepository repository, {
+  List<Override> extra = const <Override>[],
+}) {
   final GoRouter router = GoRouter(
     initialLocation: RoutePaths.signIn,
     routes: <RouteBase>[
@@ -46,6 +55,7 @@ Widget _harness(FakeAuthRepository repository) {
       authRepositoryProvider.overrideWithValue(repository),
       secureTokenStoreProvider.overrideWithValue(InMemorySecureTokenStore()),
       deviceIdStoreProvider.overrideWithValue(InMemoryDeviceIdStore()),
+      ...extra,
     ],
     child: MaterialApp.router(
       routerConfig: router,
@@ -135,4 +145,94 @@ void main() {
 
     expect(find.text('activate placeholder'), findsOneWidget);
   });
+
+  group('the password manager', () {
+    // 2026-10-31: it was never told a sign-in had finished, so it offered to
+    // save once by chance and never to update a changed password.
+    Future<_SignInOnly> signIn(WidgetTester tester, {Object? refusal}) async {
+      final _SignInOnly notifier = _SignInOnly(refusal);
+      // The error message reads the chosen language from preferences.
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final SharedPreferences preferences =
+          await SharedPreferences.getInstance();
+      await tester.pumpWidget(
+        _harness(
+          FakeAuthRepository(),
+          extra: <Override>[
+            authNotifierProvider.overrideWith(() => notifier),
+            sharedPreferencesProvider.overrideWithValue(preferences),
+          ],
+        ),
+      );
+      await tester.enterText(find.byType(TextFormField).first, 'someone');
+      await tester.enterText(
+        find.descendant(
+          of: find.byType(PasswordField),
+          matching: find.byType(EditableText),
+        ),
+        'a password',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, 'Continue'));
+      await tester.pumpAndSettle();
+      return notifier;
+    }
+
+    // Flutter's test text input records what the screen sends the platform.
+    bool savedPassword(WidgetTester tester) => tester.testTextInput.log.any(
+      (MethodCall call) =>
+          call.method == 'TextInput.finishAutofillContext' &&
+          call.arguments == true,
+    );
+
+    testWidgets('is asked to save after a successful sign-in', (
+      WidgetTester tester,
+    ) async {
+      final _SignInOnly notifier = await signIn(tester);
+
+      expect(notifier.calls, 1);
+      expect(savedPassword(tester), isTrue);
+    });
+
+    testWidgets('is never asked to save a password that was refused', (
+      WidgetTester tester,
+    ) async {
+      final _SignInOnly notifier = await signIn(
+        tester,
+        refusal: const NebulaApiException(
+          statusCode: 401,
+          detail: 'Authentication was not accepted',
+        ),
+      );
+
+      expect(notifier.calls, 1);
+      expect(savedPassword(tester), isFalse);
+    });
+  });
+}
+
+/// Only the sign-in step, succeeding or refused: what the screen does after
+/// it, without the rest of the app starting up behind it.
+class _SignInOnly extends AuthNotifier {
+  _SignInOnly(this.refusal);
+
+  final Object? refusal;
+  int calls = 0;
+
+  @override
+  AuthState build() => const AuthUnauthenticated();
+
+  @override
+  Future<void> login({
+    required String identifier,
+    required String password,
+    required String deviceName,
+    required DevicePlatform platform,
+    required String clientVersion,
+  }) async {
+    calls++;
+    final Object? error = refusal;
+    if (error != null) {
+      throw error;
+    }
+  }
 }
