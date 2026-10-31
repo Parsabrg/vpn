@@ -216,6 +216,33 @@ class TestRedeeming:
         assert {item.protocol_profile_id for item in enabled} == {p.id for p in profiles}
         assert "vless-ws-tls-adblock" in asked[0]
 
+    def test_a_wireguard_node_is_stored_with_its_range(self) -> None:
+        # Without it the control plane could give no device a WireGuard
+        # address on a joined server (Tehran, 2026-10-31).
+        from ipaddress import IPv4Address, IPv4Network
+
+        from nebula_api.auth.opaque_tokens import issue_opaque_token
+        from nebula_api.models.topology import VPNServer
+
+        token = issue_opaque_token(1)
+        session = FakeSession([_token_row(token)])
+        asyncio.run(
+            _service(session).redeem(
+                token=token,
+                csr_pem=create_certificate_request(common_name="whatever")[0],
+                authority=_authority(),
+                public_host="vps2.example.com",
+                agent_host="10.0.0.2",
+                agent_port=9443,
+                wireguard_client_pool=IPv4Network("10.77.0.0/20"),
+                wireguard_gateway_address=IPv4Address("10.77.0.1"),
+            )
+        )
+
+        server = next(item for item in session.added if isinstance(item, VPNServer))
+        assert server.wireguard_client_pool == "10.77.0.0/20"
+        assert server.wireguard_gateway_address == "10.77.0.1"
+
     def test_the_certificate_names_the_node_from_the_token_not_the_request(self) -> None:
         # A requester that could name itself would be able to obtain a
         # certificate for another node's hostname and impersonate it.

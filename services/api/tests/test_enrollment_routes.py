@@ -318,3 +318,35 @@ def test_before_rotating_a_node_still_trusts_the_node_ca(tmp_path: Path) -> None
     assert service.calls[0]["client_authority_pem"] == (
         (tmp_path / "node_ca_certificate").read_bytes()
     )
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"wireguard_client_pool": "10.77.0.0/24"},
+        {"wireguard_client_pool": "10.77.0.0/24", "wireguard_gateway_address": "10.78.0.1"},
+        {"wireguard_client_pool": "8.8.8.0/24", "wireguard_gateway_address": "8.8.8.1"},
+    ],
+)
+def test_a_wireguard_range_that_does_not_fit_is_refused(
+    tmp_path: Path, fields: dict[str, str]
+) -> None:
+    service = FakeEnrollmentService(_enrolled())
+    with make_client(tmp_path, service) as client:
+        response = client.post("/v1/nodes/enroll", json=_body(**fields))
+
+    assert response.status_code == 422
+    assert service.calls == []
+
+
+def test_the_wireguard_range_reaches_the_service(tmp_path: Path) -> None:
+    service = FakeEnrollmentService(_enrolled())
+    with make_client(tmp_path, service) as client:
+        response = client.post(
+            "/v1/nodes/enroll",
+            json=_body(wireguard_client_pool="10.77.0.0/20", wireguard_gateway_address="10.77.0.1"),
+        )
+
+    assert response.status_code == 200
+    assert str(service.calls[0]["wireguard_client_pool"]) == "10.77.0.0/20"
+    assert str(service.calls[0]["wireguard_gateway_address"]) == "10.77.0.1"

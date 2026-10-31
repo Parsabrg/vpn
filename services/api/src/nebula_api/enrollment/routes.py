@@ -86,6 +86,8 @@ async def enroll_node(
             agent_host=payload.agent_host,
             agent_port=payload.agent_port,
             protocol_profiles=payload.protocol_profiles,
+            wireguard_client_pool=payload.wireguard_client_pool,
+            wireguard_gateway_address=payload.wireguard_gateway_address,
         )
     except UnicodeEncodeError:
         # A certificate request is PEM, which is ASCII. Refused the same way
