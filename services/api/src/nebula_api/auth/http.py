@@ -1,5 +1,6 @@
 """HTTP-facing authentication safeguards shared by both identity realms."""
 
+import logging
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network, ip_address
 
 from fastapi import FastAPI, HTTPException, Request, Response, status
@@ -13,6 +14,7 @@ from nebula_api.settings import Settings
 AUTH_CACHE_CONTROL = "no-store"
 AUTH_REFERRER_POLICY = "no-referrer"
 _ADMIN_CSRF_REPLACEMENT_STATE = "_nebula_admin_csrf_replacement"
+_LOGGER = logging.getLogger(__name__)
 
 
 def install_auth_http_safeguards(application: FastAPI, settings: Settings) -> None:
@@ -31,7 +33,17 @@ def install_auth_http_safeguards(application: FastAPI, settings: Settings) -> No
     async def auth_response_policy(
         request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            # The CSRF token this request spent has a staged replacement; a
+            # bare 500 dropped it, and every later admin action was refused
+            # as "session ended" (2026-10-31).
+            _LOGGER.exception("unhandled error answering %s %s", request.method, request.url.path)
+            response = JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Internal Server Error"},
+            )
         _apply_staged_admin_csrf(request, response, settings)
         if request.url.path.startswith(("/v1/auth", "/v1/admin/auth")):
             apply_auth_response_headers(response)

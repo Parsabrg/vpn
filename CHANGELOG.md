@@ -11,6 +11,9 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- Approving an account request whose email or username is taken says so (409) instead of
+  failing, and a server error no longer leaves the admin panel refusing every later
+  action as "session ended".
 - Agents trust a CA of the control plane's own, which signs nothing else: no server's
   certificate, old ones included, can call another server's agent. New installs use it
   from the start; existing ones move over with `docs/runbooks/agent-certificates.md`.

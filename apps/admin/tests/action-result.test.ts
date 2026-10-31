@@ -66,6 +66,15 @@ describe("toActionResult", () => {
     });
   });
 
+  it("maps a 409 ApiError to conflict with the API's message", async () => {
+    const message =
+      "An account with this username already exists. Reject this request.";
+    const result = await toActionResult(
+      Promise.reject(new ApiError(409, message, message)),
+    );
+    expect(result).toEqual({ ok: false, code: "conflict", message });
+  });
+
   it("maps any other error to unknown with a generic message", async () => {
     const result = await toActionResult(Promise.reject(new Error("boom")));
     expect(result).toEqual({

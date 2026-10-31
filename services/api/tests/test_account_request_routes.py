@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from fastapi.testclient import TestClient
 
 from nebula_api.accounts.service import (
+    AccountRequestConflict,
     AccountRequestRateLimited,
     AccountRequestRejected,
     AccountRequestService,
@@ -337,3 +338,20 @@ def test_admin_approve_maps_domain_and_admin_auth_failures() -> None:
 
     assert denied.status_code == 401
     assert conflict.status_code == 400
+
+
+def test_admin_approve_names_a_taken_username() -> None:
+    account_service = FakeAccountRequestService()
+    account_service.error = AccountRequestConflict(
+        "An account with this username already exists. Reject this request."
+    )
+    with make_client(account_service=account_service) as client:
+        headers = _authenticated_admin_headers(client)
+        response = client.post(
+            f"/v1/admin/account-requests/{uuid4()}/approve", headers=headers, json={}
+        )
+
+    assert response.status_code == 409
+    assert "username already exists" in response.json()["detail"]
+    # The spent CSRF token's replacement comes back, so the next action works.
+    assert response.headers.get("x-csrf-token")
