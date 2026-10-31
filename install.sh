@@ -40,13 +40,13 @@ SECRETS=$ETC/secrets
 STATE=$ETC/install.conf
 COMPOSE_FILE=$REPO/infrastructure/compose/production.yaml
 PROJECT=nebula-production
-XRAY_VERSION=26.9.30
+XRAY_VERSION=26.10.21
 HYSTERIA_VERSION=2.9.2
-# From the publishers' own .dgst / hashes.txt; Xray checked 2026-10-30,
+# From the publishers' own .dgst / hashes.txt; Xray checked 2026-10-31,
 # Hysteria2 2026-10-26.
 declare -A XRAY_SHA=(
-  [amd64]=f851110beaff16e78d643f0ccfd9524b4a44dfd59bae3e34bb52bba378f7690e
-  [arm64]=9886f077f9fd8e6713b84c377c1c7db4e53b9bfa8c276a5bd12561139522b473
+  [amd64]=0eec3ed4163c273d8c8bf821f7d219e257921cf584aa3fb970715e458e631978
+  [arm64]=d1304946c486d98e6b886e9b931eaaaebb23835b30e217638037b7f2721d4e9c
 )
 declare -A HYSTERIA_SHA=(
   [amd64]=86fef8e2f1b2bf41318ac96724eee6c3b449e4e510022cc89658b63a6713922a
@@ -538,9 +538,12 @@ usermod -aG nebula-secrets nebula-agent; usermod -aG nebula-agent nebula-xray
 install -d -o nebula-agent -g nebula-agent -m 0700 /var/lib/nebula/wireguard
 install -d -o nebula-agent -g nebula-agent -m 0750 /etc/nebula/xray
 install -d -o nebula-agent -g root -m 2750 /etc/nebula/hysteria
-# A rerun brings an older Xray up to the pinned one; install(1) replaces the
-# file rather than writing into the running binary.
-if [ "$(/usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print $2}')" != "$XRAY_VERSION" ]; then
+# A rerun brings an older Xray up to the pinned one, never down: a server
+# updated by hand to a newer release keeps it. install(1) replaces the file
+# rather than writing into the running binary.
+XRAY_HAVE=$(/usr/local/bin/xray version 2>/dev/null | awk 'NR==1{print $2}' || true)
+if [ -z "$XRAY_HAVE" ] ||
+  [ "$(printf '%s\n' "$XRAY_HAVE" "$XRAY_VERSION" | sort -V | head -1)" != "$XRAY_VERSION" ]; then
   zip=$([ $ARCH = amd64 ] && echo Xray-linux-64.zip || echo Xray-linux-arm64-v8a.zip)
   fetch -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/download/v$XRAY_VERSION/$zip"
   echo "${XRAY_SHA[$ARCH]}  /tmp/xray.zip" | sha256sum -c --quiet || die "Xray download failed its checksum"
