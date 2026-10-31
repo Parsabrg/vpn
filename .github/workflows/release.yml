@@ -1,0 +1,239 @@
+name: Release
+
+# Builds a client release from its tag on GitHub's machines: Android, Windows
+# and Linux, plus the SBOM, each with a build attestation (GitHub's signed
+# record of the commit and workflow that made it). Nothing here holds a
+# signing key: the APKs come out signed with the public debug key and named
+# -tosign, and the maintainer signs them and SHA256SUMS.txt on their own
+# machine before publishing the draft (docs/runbooks/client-release.md).
+#
+# A pushed tag vX makes a draft release vX. Run by hand, or on a pull request
+# that changes this file, it builds the branch and keeps the files as workflow
+# artifacts instead (a dry run).
+on:
+  push:
+    tags: ["v*"]
+  # A change to this workflow is built as a dry run before it is merged.
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: The tag, the pubspec and kClientVersion agree
+        id: version
+        run: |
+          set -eu
+          version=$(sed -n 's/^version: \([^+]*\)+.*/\1/p' apps/mobile/pubspec.yaml)
+          client=$(sed -n "s/^const String kClientVersion = '\(.*\)';/\1/p" apps/mobile/lib/core/app_info.dart)
+          [ "$version" = "$client" ] || { echo "pubspec $version, kClientVersion $client"; exit 1; }
+          if [ "${{ github.event_name }}" = push ]; then
+            [ "${GITHUB_REF_NAME}" = "v$version" ] || { echo "tag $GITHUB_REF_NAME, app $version"; exit 1; }
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: SBOM
+        run: python3 tool/sbom.py --version "${{ steps.version.outputs.version }}" > "nebula-vpn-v${{ steps.version.outputs.version }}-sbom.cdx.json"
+        working-directory: apps/mobile
+      # actions/attest-build-provenance v4.2.2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        if: steps.version.outputs.publish == 'true'
+        with:
+          subject-path: apps/mobile/nebula-vpn-v*-sbom.cdx.json
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: sbom
+          path: apps/mobile/nebula-vpn-v*-sbom.cdx.json
+
+  android:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    container: ghcr.io/cirruslabs/flutter:3.44.0@sha256:46691e311715845de03a3ba4753a475476936805b29431b1f00f1816981033f8
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Install the Android NDK
+        run: yes | sdkmanager --install "ndk;28.2.13676358" > /dev/null
+      - name: Vendor the patched flutter_v2ray_client
+        working-directory: apps/mobile
+        run: |
+          flutter pub cache add flutter_v2ray_client --version 3.4.1
+          python3 third_party_src/vendor_plugin.py
+          flutter pub get
+      # One APK per ABI and a universal one, all with the same version code
+      # (never --split-per-abi). No release key here: Gradle falls back to the
+      # public debug key, hence -tosign.
+      - name: Build the APKs
+        working-directory: apps/mobile
+        run: |
+          set -eu
+          v=${{ needs.prepare.outputs.version }}
+          mkdir -p release
+          for abi in android-arm64 android-arm android-x64 universal; do
+            if [ $abi = universal ]; then flutter build apk --release; else flutter build apk --release --target-platform $abi; fi
+            name=${abi#android-}
+            cp build/app/outputs/flutter-apk/app-release.apk "release/nebula-vpn-v$v-android-$name-tosign.apk"
+            rm -rf build/app/intermediates
+          done
+          ls -la release
+      # actions/attest-build-provenance v4.2.2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        if: needs.prepare.outputs.publish == 'true'
+        with:
+          subject-path: apps/mobile/release/*
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: android
+          path: apps/mobile/release/*
+
+  windows:
+    needs: prepare
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # subosito/flutter-action v2.21.0
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: "3.44.0"
+          channel: stable
+      - name: Inno Setup
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+      - name: Vendor the pinned Android tunnel dependency
+        working-directory: apps/mobile
+        shell: pwsh
+        run: |
+          flutter pub cache add flutter_v2ray_client --version 3.4.1
+          python third_party_src/vendor_plugin.py
+      - name: Build the installer and the portable zip
+        working-directory: apps/mobile
+        shell: pwsh
+        run: |
+          ./tool/build_windows_installer.ps1 -OutputDirectory build\release
+          $v = "${{ needs.prepare.outputs.version }}"
+          New-Item -ItemType Directory -Force release | Out-Null
+          Move-Item build\release\NebulaVPN-windows-x64-setup.exe "release\nebula-vpn-v$v-windows-x64-setup.exe"
+          Move-Item build\release\NebulaVPN-windows-x64-portable.zip "release\nebula-vpn-v$v-windows-x64-portable.zip"
+          Get-ChildItem release
+      # actions/attest-build-provenance v4.2.2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        if: needs.prepare.outputs.publish == 'true'
+        with:
+          subject-path: apps/mobile/release/*
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: windows
+          path: apps/mobile/release/*
+
+  linux:
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      # actions/checkout v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      # subosito/flutter-action v2.21.0
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: "3.44.0"
+          channel: stable
+      - name: Build tools and libraries
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q clang cmake ninja-build pkg-config libgtk-3-dev \
+            libsecret-1-dev libjsoncpp-dev libayatana-appindicator3-dev desktop-file-utils
+      - name: Vendor the pinned Android tunnel dependency
+        working-directory: apps/mobile
+        run: |
+          flutter pub cache add flutter_v2ray_client --version 3.4.1
+          python3 third_party_src/vendor_plugin.py
+      - name: Build the .deb, AppImage and portable folder
+        working-directory: apps/mobile
+        run: |
+          set -eu
+          v=${{ needs.prepare.outputs.version }}
+          OUTPUT_DIRECTORY=build/release tool/build_linux_packages.sh
+          mkdir -p release
+          mv build/release/nebula-vpn_*_amd64.deb "release/nebula-vpn-v$v-linux-x64.deb"
+          mv build/release/Nebula_VPN-*-x86_64.AppImage "release/nebula-vpn-v$v-linux-x64.AppImage"
+          mv build/release/nebula-vpn-*-linux-x64.tar.gz "release/nebula-vpn-v$v-linux-x64.tar.gz"
+          ls -la release
+      # actions/attest-build-provenance v4.2.2
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8
+        if: needs.prepare.outputs.publish == 'true'
+        with:
+          subject-path: apps/mobile/release/*
+      # actions/upload-artifact v7.0.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: linux
+          path: apps/mobile/release/*
+
+  draft:
+    # One place that writes the release: every file, once all three built.
+    needs: [prepare, android, windows, linux]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      # actions/download-artifact v8.0.2
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          path: files
+          merge-multiple: true
+      - name: Draft release with every file
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          ls -la files
+          notes="Built by the Release workflow from $GITHUB_REF_NAME. Not published: the maintainer signs the APKs and SHA256SUMS.txt first (docs/runbooks/client-release.md)."
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 \
+            || gh release create "$GITHUB_REF_NAME" --draft --verify-tag \
+                 --title "Nebula VPN ${{ needs.prepare.outputs.version }}" --notes "$notes"
+          gh release upload "$GITHUB_REF_NAME" files/* --clobber

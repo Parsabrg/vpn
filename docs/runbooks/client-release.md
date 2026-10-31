@@ -3,10 +3,11 @@
 How a Nebula client release is cut, as practised since 0.1.12, with a SHA-256
 manifest from the first release after 2026-10-01 (roadmap section 60).
 
-Releases are built on the maintainer's machine: the Android signing key lives
-there (see [release-signing-key.md](release-signing-key.md)). CI runs on
-GitHub-hosted runners and checks every pull request, but does not sign or
-publish releases.
+Releases are built on GitHub from the release tag, unsigned and with build
+attestations; the maintainer checks them, signs the APKs and the manifest on
+their own machine, where the signing key lives (see
+[release-signing-key.md](release-signing-key.md)), and publishes. No signing
+key is ever stored on GitHub.
 
 **Public releases carry no addresses.** No `API_BASE_URL`, no
 `API_BACKUP_URL`, no `FREE_LINKS`: one generic app for every installation,
@@ -32,76 +33,98 @@ Run the local Flutter gate (`dart format --set-exit-if-changed lib test`,
 `flutter analyze --fatal-infos`, `flutter test`), then merge once the runner
 checks pass.
 
-## 2. Build
+## 2. Build (GitHub)
 
-From `apps/mobile` on the merged `main`, into a folder of its own under
-`build/` -- never `dist/`, which may hold a copy someone is running.
+Tag the merged release commit and push the tag:
 
 ```sh
-DEFINES=""   # public releases from 0.1.32; 0.1.31 only: see above
+git tag vX <merge commit> && git push origin vX
 ```
 
-`--dart-define-from-file=<free.json>` with `{"FREE_LINKS": "vless://..."}`
-gives a private build relays to offer someone with no server. Public
-releases leave it out: free mode then uses the links and subscriptions the
-person adds.
+The **Release** workflow (`.github/workflows/release.yml`) then builds
+everything from that tag on GitHub's machines, and refuses if the tag,
+`pubspec.yaml` and `kClientVersion` disagree:
 
-- **Android**: one APK per ABI and a universal one, all with the same
-  version code (`--target-platform android-arm64`, `android-arm`,
-  `android-x64`, then none). Not `--split-per-abi`, which gives each ABI
-  its own version code. Check every APK is signed by the release key:
-  `apksigner verify --print-certs` must show the SHA-256 in
-  release-signing-key.md.
-- **Windows**: `tool/build_windows_installer.ps1 -ApiBaseUrl <api url>
-  -ApiBackupUrl <cdn url> -DefinesFile <free.json> -OutputDirectory
-  build\release-X`; it makes the setup and the portable zip.
-- **Linux** (on Linux or WSL): `OUTPUT_DIRECTORY=build/release-X
-  tool/build_linux_packages.sh $DEFINES`; it makes the .deb, the AppImage
-  and the portable .tar.gz.
+- **Android:** one APK per ABI and a universal one, all with the same
+  version code (never `--split-per-abi`). There is no signing key on GitHub,
+  so they come out signed with the public debug key and are named
+  `nebula-vpn-vX-android-<abi>-tosign.apk`. **Never hand one of these out.**
+- **Windows:** `nebula-vpn-vX-windows-x64-setup.exe` and
+  `nebula-vpn-vX-windows-x64-portable.zip`.
+- **Linux:** `nebula-vpn-vX-linux-x64.deb`, `.AppImage` and `.tar.gz`.
+- **SBOM:** `nebula-vpn-vX-sbom.cdx.json`.
 
-Name the files `nebula-vpn-vX-<platform>-<arch>[-<kind>].<ext>`, as the
-releases so far: `nebula-vpn-vX-android-arm64.apk`,
-`nebula-vpn-vX-windows-x64-setup.exe`, `nebula-vpn-vX-linux-x64.deb`,
-`nebula-vpn-vX-linux-x64.AppImage`, `nebula-vpn-vX-linux-x64.tar.gz`.
+Each file gets a build attestation: GitHub's signed record of the commit and
+workflow that produced it. When all are built, the workflow puts them in a
+**draft** release vX. Nothing is public yet.
 
-## 3. Manifest
+A pull request that changes the workflow runs it as a dry run: the same
+builds, kept as workflow artifacts, with no draft and no attestations.
 
-In the release folder, once every file is final, first the SBOM -- every
-Dart package, engine binary (with the digest the build pins) and server
-package that went into this release, read from the files that pin them
-(roadmap section 68) -- so the manifest covers it too:
+Public releases carry no addresses, so the workflow passes no defines. A
+private build with a deployment's addresses (`API_BASE_URL`, `FREE_LINKS`)
+is still made by hand on the maintainer's machine, as before, and never
+published.
+
+## 3. Check and sign (the maintainer's machine)
+
+Download the draft's files into a folder of their own:
 
 ```sh
-python ../../tool/sbom.py --version X > nebula-vpn-vX-sbom.cdx.json
+mkdir -p build/release-X && cd build/release-X
+gh release download vX -R Parsabrg/vpn
+```
+
+**Check each came from the workflow and the tag.** This fails for a file
+anyone swapped into the draft:
+
+```sh
+for f in nebula-vpn-vX-*; do gh attestation verify "$f" -R Parsabrg/vpn || echo "NOT VERIFIED: $f"; done
+```
+
+**Sign the APKs** with the release key
+([release-signing-key.md](release-signing-key.md)). `apksigner` replaces the
+debug signature; the files are already aligned:
+
+```sh
+KS=../../android/app/nebula-release.jks
+for abi in arm64 arm x64 universal; do
+  apksigner sign --ks "$KS" --ks-key-alias nebula \
+    --out nebula-vpn-vX-android-$abi.apk nebula-vpn-vX-android-$abi-tosign.apk
+  apksigner verify --print-certs nebula-vpn-vX-android-$abi.apk | grep SHA-256
+done
+rm nebula-vpn-vX-android-*-tosign.apk
+```
+
+Every SHA-256 printed must be the one in release-signing-key.md.
+
+**The manifest**, over the final files, and its signature:
+
+```sh
 sha256sum nebula-vpn-vX-* > SHA256SUMS.txt
 sha256sum -c SHA256SUMS.txt
-```
-
-`SHA256SUMS.txt` is uploaded with the files. Anyone can check a download
-with `sha256sum -c SHA256SUMS.txt --ignore-missing` (Linux, Git Bash) or
-`Get-FileHash <file> -Algorithm SHA256` (Windows). That proves a file is the
-one in the manifest; the manifest's signature (roadmap section 61) proves
-who wrote the manifest. Sign it with the release key
-([release-signing-key.md](release-signing-key.md), "The manifest signing
-key"):
-
-```sh
 ssh-keygen -Y sign -f ../../android/app/nebula-release-sign -n nebula-release SHA256SUMS.txt
 ssh-keygen -Y verify -f ../../../../docs/release-signers -I releases@nebula-vpn \
   -n nebula-release -s SHA256SUMS.txt.sig < SHA256SUMS.txt
 ```
 
-and upload `SHA256SUMS.txt.sig` with the rest. Anyone with OpenSSH 8.1 or
-newer (Windows 10+, Linux, macOS) checks it against `docs/release-signers`
-in this repository with the second command, then the files against the
-manifest -- the release notes say how.
+Anyone can then check a download with `sha256sum -c SHA256SUMS.txt
+--ignore-missing` (Linux, Git Bash) or `Get-FileHash <file> -Algorithm
+SHA256` (Windows), and the manifest's signature with the second
+`ssh-keygen` command against `docs/release-signers` (OpenSSH 8.1 or newer).
+The attestations are a second, independent check of the Windows and Linux
+files: `gh attestation verify <file> -R Parsabrg/vpn`.
 
 ## 4. Publish
 
+Replace the `-tosign` APKs in the draft with the signed ones, add the
+manifest and its signature, write the notes, then publish as a pre-release:
+
 ```sh
-gh release create vX --draft --title "Nebula VPN X" --notes-file notes.md
-gh release upload vX <files> SHA256SUMS.txt SHA256SUMS.txt.sig
-gh release edit vX --draft=false --prerelease
+for abi in arm64 arm x64 universal; do gh release delete-asset vX nebula-vpn-vX-android-$abi-tosign.apk -R Parsabrg/vpn -y; done
+gh release upload vX nebula-vpn-vX-android-*.apk SHA256SUMS.txt SHA256SUMS.txt.sig -R Parsabrg/vpn --clobber
+gh release edit vX --notes-file notes.md -R Parsabrg/vpn
+gh release edit vX --draft=false --prerelease -R Parsabrg/vpn
 ```
 
 Large uploads can drop through the Cloudflare route; upload the files one

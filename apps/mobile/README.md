@@ -89,7 +89,7 @@ tool/build_windows_portable.ps1
 ```
 
 Linux (x64, on Linux or WSL; needs `libgtk-3-dev libsecret-1-dev
-libjsoncpp-dev libayatana-appindicator3-dev`):
+libjsoncpp-dev libayatana-appindicator3-dev desktop-file-utils`):
 
 ```sh
 tool/build_linux_packages.sh   # .deb, AppImage, .tar.gz in build/packages

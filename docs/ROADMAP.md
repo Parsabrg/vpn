@@ -46,7 +46,6 @@ written plan (or an ADR in `docs/adr/`) and the owner's OK before building.
 - Persian (right-to-left) admin panel.
 
 **Project**
-- Releases built in GitHub Actions on a tag, with build attestations.
 - Python dependencies locked with hashes and installed with `--require-hashes`.
 - A second maintainer, and how someone else cuts releases and runs the servers.
 
@@ -154,6 +153,7 @@ Updated in the same pull request as the work (section 92).
 | 60 | SHA-256 manifest with every client release; release runbook | Done, archive #250 |
 | 59, 100 | Self-service in the app: change the password (asks the current one; every other device signed out) and delete the account (asks the password). Deletion is strict: email, username, password, device names and hardware IDs, sessions, tokens, activation and reset links, the account request, emails to the address, permissions and assignments go; VPN credentials are removed from every server by reconciliation; audit rows and traffic totals stay under the random id; the deletion's audit row has no address. `docs/privacy.md` says what is kept and that backups expire within 30 days | Done; unit, route and real-PostgreSQL tests, app screens in all 10 languages |
 | 61 | Release signatures: `SHA256SUMS.txt.sig`, OpenSSH file signing against `docs/release-signers`; runbook and verification steps | Done, archive #340; 0.1.24 signed after release; the key backed up encrypted with the others |
+| 60, 61 | Client releases built on GitHub from the tag (`release.yml`): every APK, the Windows installer and portable zip, the Linux packages and the SBOM, each with a build attestation, into a draft release; the maintainer verifies them (`gh attestation verify`), signs the APKs and `SHA256SUMS.txt` locally and publishes. No signing key on GitHub | Done; the workflow dry-runs on any pull request that changes it |
 | 92, 108 A7 | Documentation brought to current reality | Done, archive #251 |
 | 18, 77 | Leak test in Settings › Diagnostics: measured exit, forged-DNS check, resolver network, IPv6 (0.1.17) | Done, archive #252 |
 | 4 | Chrome TLS fingerprint on VLESS (0.1.15) | Done, archive #240 |
