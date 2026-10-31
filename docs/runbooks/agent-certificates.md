@@ -23,7 +23,10 @@ trust the new CA would cut every one of them off.
 
 ## Moving an existing installation
 
-Users' tunnels keep running throughout. Only the control plane's calls to
+Users' tunnels keep running throughout. Leave the ownership of
+`/etc/nebula/secrets` itself alone (root:nebula-secrets, 0750): the agent
+reads its files through that group, and changing it stops the agent starting
+("PermissionError" in `journalctl -u nebula-vpn-agent`). Only the control plane's calls to
 agents (new devices, removals, usage) depend on these steps. After each step,
 check that every server still answers:
 
@@ -53,12 +56,21 @@ openssl req -new -key agent_tls_key.new -subj /CN=agent -out /tmp/agent.csr
 
 Copy `/tmp/agent.csr` to the control plane and sign it there, for the
 server's code as the panel shows it (names come from its record, not from
-the request):
+the request). The API container's filesystem is read-only, so the request
+goes in on stdin rather than with `docker cp`:
 
 ```bash
-docker cp agent.csr nebula-production-api-1:/tmp/agent.csr
-api nebula-api sign-server-certificate --server <code> --csr /tmp/agent.csr > agent_tls_cert.new
+docker exec -i nebula-production-api-1 nebula-api sign-server-certificate \
+  --server <code> --csr /dev/stdin < agent.csr > agent_tls_cert.new
 api cat /var/lib/nebula/client_ca_certificate > client_ca_certificate
+```
+
+Check that the certificate is for server use and matches the new key
+before installing it:
+
+```bash
+openssl x509 -in agent_tls_cert.new -noout -subject -ext subjectAltName,extendedKeyUsage
+[ "$(openssl x509 -in agent_tls_cert.new -noout -pubkey)" = "$(openssl pkey -in agent_tls_key.new -pubout)" ] && echo match
 ```
 
 Back on the server, put the new pair in place and trust both CAs (the old
@@ -70,6 +82,7 @@ cat /root/agent-certs-old/agent_ca client_ca_certificate > agent_ca.new
 for f in agent_tls_cert agent_tls_key agent_ca; do
   chown --reference=$f $f.new; chmod --reference=$f $f.new; mv $f.new $f
 done
+chown --reference=agent_ca client_ca_certificate; chmod --reference=agent_ca client_ca_certificate
 systemctl restart nebula-vpn-agent
 ```
 
