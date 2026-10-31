@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "Reddedildi; son liste korunuyor",
   "freeSubscriptionTooLarge": "Liste okunamayacak kadar büyük",
   "freeSubscriptionEmpty": "İçinde bu uygulamanın kullanabileceği bağlantı yok",
-  "freeSubscriptionNotYet": "Henüz alınmadı"
+  "freeSubscriptionNotYet": "Henüz alınmadı",
+
+  "change": "Değiştir",
+  "changePasswordTitle": "Parolayı değiştir",
+  "fieldCurrentPassword": "Mevcut parola",
+  "changePasswordIntro": "Burada oturumunuz açık kalır. Diğer tüm cihazlarda oturum kapatılır.",
+  "changePasswordAction": "Parolayı değiştir",
+  "changingPassword": "Değiştiriliyor",
+  "passwordChanged": "Parola değiştirildi. Diğer cihazlarda oturum kapatıldı.",
+  "passwordNotAccepted": "Bu sizin parolanız değil.",
+  "deleteAccountRow": "Hesabı sil",
+  "deleteAccountTitle": "Hesabı sil",
+  "deleteAccountIntro": "Bu, hesabınızı hemen ve geri alınamaz şekilde siler. E-postanız, kullanıcı adınız, parolanız, cihazlarınız ve giriş bağlantılarınız silinir; VPN erişiminiz tüm sunuculardan kaldırılır.",
+  "deleteAccountKept": "Kullanım toplamları ve güvenlik kaydı, sizinle bağlantısı olmayan rastgele bir numarayla saklanır. Yedekler eski verileri 30 güne kadar tutar.",
+  "deleteAccountAction": "Hesabımı sil",
+  "deletingAccount": "Siliniyor",
+  "accountDeleted": "Hesabınız silindi."
 }

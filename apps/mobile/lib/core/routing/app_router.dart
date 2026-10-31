@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/account/account_screen.dart';
+import '../../features/account/account_security_screens.dart';
 import '../../features/account_request/account_request_screen.dart';
 import '../../features/activation/activation_screen.dart';
 import '../../features/auth/sign_in_screen.dart';
@@ -186,6 +187,16 @@ final routerProvider = Provider<GoRouter>((Ref ref) {
         path: RoutePaths.homeSettings,
         pageBuilder: (BuildContext context, GoRouterState state) =>
             buildNebulaPage(context, state, const SettingsScreen()),
+      ),
+      GoRoute(
+        path: RoutePaths.homeChangePassword,
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            buildNebulaPage(context, state, const ChangePasswordScreen()),
+      ),
+      GoRoute(
+        path: RoutePaths.homeDeleteAccount,
+        pageBuilder: (BuildContext context, GoRouterState state) =>
+            buildNebulaPage(context, state, const DeleteAccountScreen()),
       ),
       GoRoute(
         path: RoutePaths.homeSplitTunnel,

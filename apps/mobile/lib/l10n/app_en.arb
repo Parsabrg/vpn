@@ -503,5 +503,21 @@
   "freeSubscriptionRefused": "It refused; the last list is kept",
   "freeSubscriptionTooLarge": "The list is too large to read",
   "freeSubscriptionEmpty": "No connection in it that this app can use",
-  "freeSubscriptionNotYet": "Not fetched yet"
+  "freeSubscriptionNotYet": "Not fetched yet",
+
+  "change": "Change",
+  "changePasswordTitle": "Change password",
+  "fieldCurrentPassword": "Current password",
+  "changePasswordIntro": "You stay signed in here. Every other device is signed out.",
+  "changePasswordAction": "Change password",
+  "changingPassword": "Changing",
+  "passwordChanged": "Password changed. Other devices were signed out.",
+  "passwordNotAccepted": "That is not your password.",
+  "deleteAccountRow": "Delete account",
+  "deleteAccountTitle": "Delete account",
+  "deleteAccountIntro": "This deletes your account at once and cannot be undone. Your email, username, password, devices and sign-in links are deleted, and your VPN access is removed from every server.",
+  "deleteAccountKept": "Usage totals and the security log are kept under a random number that is not linked to you. Backups keep the old data for up to 30 days.",
+  "deleteAccountAction": "Delete my account",
+  "deletingAccount": "Deleting",
+  "accountDeleted": "Your account was deleted."
 }

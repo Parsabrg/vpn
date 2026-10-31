@@ -8,9 +8,10 @@ code for.
 """
 
 from datetime import UTC, datetime
-from typing import cast
+from typing import ClassVar, cast
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -22,7 +23,12 @@ from nebula_api.account.service import (
     DeviceRevocationRefused,
 )
 from nebula_api.auth.http import install_auth_http_safeguards
-from nebula_api.auth.user_service import AuthenticatedUser, AuthenticationRejected, UserAuthService
+from nebula_api.auth.user_service import (
+    AuthenticatedUser,
+    AuthenticationRateLimited,
+    AuthenticationRejected,
+    UserAuthService,
+)
 from nebula_api.settings import Settings
 
 USER_ID = UUID("11111111-1111-4111-8111-111111111111")
@@ -42,6 +48,23 @@ class FakeUserAuthService:
         if self.error is not None:
             raise self.error
         return AuthenticatedUser(user_id=USER_ID, session_id=SESSION_ID, device_id=DEVICE_ID)
+
+    # Password change and deletion: what they were asked, or the refusal.
+    password_error: Exception | None = None
+    calls: list[tuple[str, dict[str, object]]]
+
+    async def change_password(self, **kwargs: object) -> None:
+        self._record("change_password", kwargs)
+
+    async def delete_account(self, **kwargs: object) -> None:
+        self._record("delete_account", kwargs)
+
+    def _record(self, name: str, kwargs: dict[str, object]) -> None:
+        if not hasattr(self, "calls"):
+            self.calls = []
+        self.calls.append((name, kwargs))
+        if self.password_error is not None:
+            raise self.password_error
 
 
 def _entry(
@@ -288,3 +311,77 @@ class TestRevokeDevice:
 
         assert response.status_code == 422
         assert service.revoked == []
+
+
+class TestPasswordAndDeletion:
+    """POST /v1/account/password and /v1/account/delete."""
+
+    CHANGE: ClassVar[dict[str, str]] = {
+        "current_password": "old-password",
+        "new_password": "a-new-password-12",
+    }
+
+    def test_a_password_change_reaches_the_service(self) -> None:
+        auth = FakeUserAuthService()
+        with make_client(user_auth_service=auth) as client:
+            response = client.post("/v1/account/password", headers=AUTH_HEADERS, json=self.CHANGE)
+
+        assert response.status_code == 204
+        name, kwargs = auth.calls[0]
+        assert name == "change_password"
+        assert kwargs["current_password"] == "old-password"  # noqa: S105 - test fixture
+        assert kwargs["principal"] == AuthenticatedUser(USER_ID, SESSION_ID, DEVICE_ID)
+
+    def test_a_short_new_password_is_refused_before_the_service(self) -> None:
+        auth = FakeUserAuthService()
+        with make_client(user_auth_service=auth) as client:
+            response = client.post(
+                "/v1/account/password",
+                headers=AUTH_HEADERS,
+                json={"current_password": "old-password", "new_password": "short"},
+            )
+
+        assert response.status_code == 422
+        assert not hasattr(auth, "calls")
+
+    @pytest.mark.parametrize("path", ["/v1/account/password", "/v1/account/delete"])
+    def test_a_wrong_password_is_403_so_the_app_keeps_the_session(self, path: str) -> None:
+        # The app signs out on a 401; a mistyped password must not do that.
+        auth = FakeUserAuthService()
+        auth.password_error = AuthenticationRejected("Authentication was not accepted")
+        body = self.CHANGE if path.endswith("password") else {"password": "wrong"}
+        with make_client(user_auth_service=auth) as client:
+            response = client.post(path, headers=AUTH_HEADERS, json=body)
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "password_not_accepted"
+
+    def test_guessing_is_told_to_wait(self) -> None:
+        auth = FakeUserAuthService()
+        auth.password_error = AuthenticationRateLimited(900)
+        with make_client(user_auth_service=auth) as client:
+            response = client.post(
+                "/v1/account/delete", headers=AUTH_HEADERS, json={"password": "x"}
+            )
+
+        assert response.status_code == 429
+        assert response.headers["retry-after"] == "900"
+
+    def test_deletion_reaches_the_service(self) -> None:
+        auth = FakeUserAuthService()
+        with make_client(user_auth_service=auth) as client:
+            response = client.post(
+                "/v1/account/delete", headers=AUTH_HEADERS, json={"password": "the-password"}
+            )
+
+        assert response.status_code == 204
+        assert auth.calls[0][0] == "delete_account"
+        assert auth.calls[0][1]["password"] == "the-password"  # noqa: S105 - test fixture
+
+    def test_neither_works_without_a_session(self) -> None:
+        with make_client() as client:
+            responses = [
+                client.post("/v1/account/password", json=self.CHANGE),
+                client.post("/v1/account/delete", json={"password": "x"}),
+            ]
+        assert [r.status_code for r in responses] == [401, 401]

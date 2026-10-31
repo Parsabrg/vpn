@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "رُفض الطلب؛ احتُفظ بالقائمة السابقة",
   "freeSubscriptionTooLarge": "القائمة أكبر من أن تُقرأ",
   "freeSubscriptionEmpty": "لا يوجد فيها اتصال يمكن لهذا التطبيق استخدامه",
-  "freeSubscriptionNotYet": "لم يُجلب بعد"
+  "freeSubscriptionNotYet": "لم يُجلب بعد",
+
+  "change": "تغيير",
+  "changePasswordTitle": "تغيير كلمة المرور",
+  "fieldCurrentPassword": "كلمة المرور الحالية",
+  "changePasswordIntro": "ستبقى مسجّلًا هنا. يتم تسجيل الخروج من كل الأجهزة الأخرى.",
+  "changePasswordAction": "تغيير كلمة المرور",
+  "changingPassword": "جارٍ التغيير",
+  "passwordChanged": "تم تغيير كلمة المرور. تم تسجيل الخروج من الأجهزة الأخرى.",
+  "passwordNotAccepted": "هذه ليست كلمة مرورك.",
+  "deleteAccountRow": "حذف الحساب",
+  "deleteAccountTitle": "حذف الحساب",
+  "deleteAccountIntro": "يحذف هذا حسابك فورًا ولا يمكن التراجع عنه. تُحذف بريدك الإلكتروني واسم المستخدم وكلمة المرور والأجهزة وروابط تسجيل الدخول، ويُزال وصولك إلى VPN من كل الخوادم.",
+  "deleteAccountKept": "تُحفظ إجماليات الاستخدام وسجل الأمان برقم عشوائي غير مرتبط بك. تحتفظ النسخ الاحتياطية بالبيانات القديمة حتى 30 يومًا.",
+  "deleteAccountAction": "احذف حسابي",
+  "deletingAccount": "جارٍ الحذف",
+  "accountDeleted": "تم حذف حسابك."
 }

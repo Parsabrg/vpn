@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "Abgelehnt; die letzte Liste bleibt",
   "freeSubscriptionTooLarge": "Die Liste ist zu groß zum Lesen",
   "freeSubscriptionEmpty": "Keine Verbindung darin, die diese App nutzen kann",
-  "freeSubscriptionNotYet": "Noch nicht abgerufen"
+  "freeSubscriptionNotYet": "Noch nicht abgerufen",
+
+  "change": "Ändern",
+  "changePasswordTitle": "Passwort ändern",
+  "fieldCurrentPassword": "Aktuelles Passwort",
+  "changePasswordIntro": "Hier bleibst du angemeldet. Alle anderen Geräte werden abgemeldet.",
+  "changePasswordAction": "Passwort ändern",
+  "changingPassword": "Wird geändert",
+  "passwordChanged": "Passwort geändert. Andere Geräte wurden abgemeldet.",
+  "passwordNotAccepted": "Das ist nicht dein Passwort.",
+  "deleteAccountRow": "Konto löschen",
+  "deleteAccountTitle": "Konto löschen",
+  "deleteAccountIntro": "Dein Konto wird sofort und endgültig gelöscht. E-Mail, Benutzername, Passwort, Geräte und Anmeldelinks werden gelöscht, und dein VPN-Zugang wird von allen Servern entfernt.",
+  "deleteAccountKept": "Verbrauchssummen und das Sicherheitsprotokoll bleiben unter einer zufälligen Nummer erhalten, die nicht mit dir verbunden ist. Sicherungen enthalten die alten Daten bis zu 30 Tage.",
+  "deleteAccountAction": "Mein Konto löschen",
+  "deletingAccount": "Wird gelöscht",
+  "accountDeleted": "Dein Konto wurde gelöscht."
 }

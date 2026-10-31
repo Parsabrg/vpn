@@ -392,5 +392,21 @@
   "freeSubscriptionRefused": "پاسخ رد داد؛ فهرست قبلی نگه داشته شد",
   "freeSubscriptionTooLarge": "فهرست برای خواندن بیش از حد بزرگ است",
   "freeSubscriptionEmpty": "هیچ اتصالی که این برنامه بتواند استفاده کند در آن نیست",
-  "freeSubscriptionNotYet": "هنوز دریافت نشده"
+  "freeSubscriptionNotYet": "هنوز دریافت نشده",
+
+  "change": "تغییر",
+  "changePasswordTitle": "تغییر رمز عبور",
+  "fieldCurrentPassword": "رمز عبور فعلی",
+  "changePasswordIntro": "در این دستگاه وارد می‌مانید. همهٔ دستگاه‌های دیگر خارج می‌شوند.",
+  "changePasswordAction": "تغییر رمز عبور",
+  "changingPassword": "در حال تغییر",
+  "passwordChanged": "رمز عبور تغییر کرد. دستگاه‌های دیگر خارج شدند.",
+  "passwordNotAccepted": "این رمز عبور شما نیست.",
+  "deleteAccountRow": "حذف حساب",
+  "deleteAccountTitle": "حذف حساب",
+  "deleteAccountIntro": "حساب شما فوراً و بدون امکان بازگشت حذف می‌شود. ایمیل، نام کاربری، رمز عبور، دستگاه‌ها و پیوندهای ورود شما حذف می‌شوند و دسترسی VPN شما از همهٔ سرورها برداشته می‌شود.",
+  "deleteAccountKept": "آمار مصرف و گزارش امنیتی با یک شمارهٔ تصادفی که به شما ربطی ندارد نگه داشته می‌شوند. نسخه‌های پشتیبان تا ۳۰ روز دادهٔ قبلی را نگه می‌دارند.",
+  "deleteAccountAction": "حساب مرا حذف کن",
+  "deletingAccount": "در حال حذف",
+  "accountDeleted": "حساب شما حذف شد."
 }

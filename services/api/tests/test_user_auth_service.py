@@ -12,6 +12,7 @@ from nebula_api.auth.key_material import AuthKeyMaterial
 from nebula_api.auth.redis_state import RateBucket, RedisAuthState
 from nebula_api.auth.user_service import (
     AccountExpired,
+    AuthenticatedUser,
     AuthenticationRateLimited,
     AuthenticationRejected,
     DeviceLimitReached,
@@ -821,3 +822,141 @@ def test_an_expired_account_with_a_wrong_password_gets_the_generic_denial() -> N
         )
 
     assert not isinstance(raised.value, AccountExpired)
+
+
+def _principal() -> AuthenticatedUser:
+    return AuthenticatedUser(user_id=USER_ID, session_id=SESSION_ID, device_id=DEVICE_ID)
+
+
+def _audits(database: ScriptedSession) -> list[AuditLog]:
+    return [item for item in database.added if isinstance(item, AuditLog)]
+
+
+class TestChangingThePasswordWhileSignedIn:
+    def test_the_new_password_replaces_the_old_and_other_sessions_end(self) -> None:
+        account = user()
+        old_hash = account.password_hash
+        other_session = uuid4()
+        database = ScriptedSession(scalar_values=(account,), scalars_values=((other_session,),))
+        auth, _ = service(ScriptedFactory(database))
+
+        asyncio.run(
+            auth.change_password(
+                principal=_principal(),
+                current_password=PASSWORD,
+                new_password="a-new-password-canary",  # noqa: S106 - test fixture
+                request_id=uuid4(),
+            )
+        )
+
+        assert account.password_hash != old_hash
+        # Reset links, then the other session and its refresh tokens.
+        assert len(database.executed) == 3
+        assert [a.event_code for a in _audits(database)] == ["password_changed"]
+        assert database.commits == 1
+
+    def test_a_wrong_current_password_changes_nothing(self) -> None:
+        account = user()
+        old_hash = account.password_hash
+        database = ScriptedSession(scalar_values=(account,))
+        auth, _ = service(ScriptedFactory(database))
+
+        with pytest.raises(AuthenticationRejected):
+            asyncio.run(
+                auth.change_password(
+                    principal=_principal(),
+                    current_password="not-the-password",  # noqa: S106 - test fixture
+                    new_password="a-new-password-canary",  # noqa: S106 - test fixture
+                    request_id=uuid4(),
+                )
+            )
+
+        assert account.password_hash == old_hash
+        assert database.executed == []
+        assert [(a.event_code, a.outcome) for a in _audits(database)] == [
+            ("user_authenticated", "denied")
+        ]
+
+    def test_guessing_is_rate_limited(self) -> None:
+        database = ScriptedSession()
+        redis = AllowingRedis()
+        redis.allowed = False
+        auth, _ = service(ScriptedFactory(database), redis)
+
+        with pytest.raises(AuthenticationRateLimited):
+            asyncio.run(
+                auth.change_password(
+                    principal=_principal(),
+                    current_password=PASSWORD,
+                    new_password="a-new-password-canary",  # noqa: S106 - test fixture
+                    request_id=uuid4(),
+                )
+            )
+        assert redis.buckets[0][0].namespace == "user-account"
+
+
+class TestDeletingTheAccount:
+    def test_nothing_that_names_the_person_is_left_on_the_rows_kept(self) -> None:
+        account = user()
+        account.username = "parsa"
+        account.username_normalized = "parsa"
+        phone = device()
+        phone.hardware_hash = b"h" * 32
+        phone.hardware_key_version = 1
+        database = ScriptedSession(
+            scalar_values=(account,),
+            # The devices, then each device's WireGuard peers and Xray clients.
+            scalars_values=((phone,), (), ()),
+        )
+        auth, _ = service(ScriptedFactory(database))
+
+        asyncio.run(
+            auth.delete_account(principal=_principal(), password=PASSWORD, request_id=uuid4())
+        )
+
+        assert "user@example.com" not in account.email
+        assert account.email.endswith("@deleted.invalid")
+        assert account.username is None and account.username_normalized is None
+        assert account.password_hash is None
+        assert account.state is AccountState.DISABLED and account.disabled_at == NOW
+        assert phone.state is LifecycleState.REVOKED
+        assert phone.name == "deleted"
+        assert phone.hardware_hash is None
+        # Refresh tokens, sessions, activations, reset links, request events,
+        # requests, emails, permissions, assignments.
+        assert len(database.executed) == 9
+        audit = _audits(database)
+        assert [(a.event_code, a.reason_code) for a in audit] == [
+            ("identity_state_changed", "account_deleted")
+        ]
+        assert database.commits == 1
+
+    def test_two_deletions_never_share_a_placeholder(self) -> None:
+        emails = []
+        for _ in range(2):
+            account = user()
+            database = ScriptedSession(scalar_values=(account,), scalars_values=((),))
+            auth, _ = service(ScriptedFactory(database))
+            asyncio.run(
+                auth.delete_account(principal=_principal(), password=PASSWORD, request_id=uuid4())
+            )
+            emails.append(account.email)
+        assert emails[0] != emails[1]
+
+    def test_a_wrong_password_deletes_nothing(self) -> None:
+        account = user()
+        database = ScriptedSession(scalar_values=(account,))
+        auth, _ = service(ScriptedFactory(database))
+
+        with pytest.raises(AuthenticationRejected):
+            asyncio.run(
+                auth.delete_account(
+                    principal=_principal(),
+                    password="not-the-password",  # noqa: S106 - test fixture
+                    request_id=uuid4(),
+                )
+            )
+
+        assert account.email == "user@example.com"
+        assert account.state is AccountState.ACTIVE
+        assert database.executed == []

@@ -213,11 +213,26 @@ class _Details extends ConsumerWidget {
                 valueColor: palette.blueText,
                 onTap: () => const NativeTunnelChannel().openUrl(update.page),
               ),
+            PanelRow(
+              label: text.rowPassword,
+              value: text.change,
+              onTap: () => context.push(RoutePaths.homeChangePassword),
+            ),
             // Settings is not a tab -- this is the way in.
             PanelRow(
               label: text.rowSettings,
               value: text.open,
               onTap: () => context.push(RoutePaths.homeSettings),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        PanelRowGroup(
+          rows: <PanelRow>[
+            PanelRow(
+              label: text.deleteAccountRow,
+              value: text.open,
+              onTap: () => context.push(RoutePaths.homeDeleteAccount),
             ),
           ],
         ),

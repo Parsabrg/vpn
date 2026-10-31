@@ -48,6 +48,19 @@ class PasswordResetRequest(AuthModel):
     identifier: str = Field(min_length=3, max_length=320)
 
 
+class PasswordChangeRequest(AuthModel):
+    current_password: SecretStr = Field(min_length=1, max_length=1024)
+    new_password: SecretStr = Field(min_length=12, max_length=1024)
+
+    _password_size = field_validator("current_password", "new_password")(_bounded_password)
+
+
+class AccountDeletionRequest(AuthModel):
+    password: SecretStr = Field(min_length=1, max_length=1024)
+
+    _password_size = field_validator("password")(_bounded_password)
+
+
 class PasswordResetConfirmRequest(AuthModel):
     token: SecretStr = Field(min_length=10, max_length=128)
     new_password: SecretStr = Field(min_length=12, max_length=1024)

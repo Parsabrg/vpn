@@ -13,6 +13,8 @@ abstract final class RoutePaths {
   static const String homeConnect = '/home/connect';
   static const String homeDevices = '/home/devices';
   static const String homeAccount = '/home/account';
+  static const String homeChangePassword = '/home/account/password';
+  static const String homeDeleteAccount = '/home/account/delete';
 
   /// Pushed from Account rather than being a tab: somewhere you go to
   /// change something and then leave.

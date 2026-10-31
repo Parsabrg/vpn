@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "Lo rechazó; se conserva la última lista",
   "freeSubscriptionTooLarge": "La lista es demasiado grande para leerla",
   "freeSubscriptionEmpty": "No contiene ninguna conexión que esta app pueda usar",
-  "freeSubscriptionNotYet": "Aún no descargada"
+  "freeSubscriptionNotYet": "Aún no descargada",
+
+  "change": "Cambiar",
+  "changePasswordTitle": "Cambiar contraseña",
+  "fieldCurrentPassword": "Contraseña actual",
+  "changePasswordIntro": "Seguirás con la sesión iniciada aquí. Se cerrará la sesión en los demás dispositivos.",
+  "changePasswordAction": "Cambiar contraseña",
+  "changingPassword": "Cambiando",
+  "passwordChanged": "Contraseña cambiada. Se cerró la sesión en los demás dispositivos.",
+  "passwordNotAccepted": "Esa no es tu contraseña.",
+  "deleteAccountRow": "Eliminar cuenta",
+  "deleteAccountTitle": "Eliminar cuenta",
+  "deleteAccountIntro": "Esto elimina tu cuenta de inmediato y no se puede deshacer. Se eliminan tu correo, nombre de usuario, contraseña, dispositivos y enlaces de acceso, y tu acceso VPN se quita de todos los servidores.",
+  "deleteAccountKept": "Los totales de uso y el registro de seguridad se conservan con un número aleatorio que no está vinculado a ti. Las copias de seguridad guardan los datos anteriores hasta 30 días.",
+  "deleteAccountAction": "Eliminar mi cuenta",
+  "deletingAccount": "Eliminando",
+  "accountDeleted": "Tu cuenta se eliminó."
 }
