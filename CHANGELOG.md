@@ -11,6 +11,8 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- `infrastructure/check-protocols.py` proves every protocol a server offers carries
+  traffic; the install test runs it after every fresh install.
 - Enrolment sends the server's WireGuard range: before, no enrolled server had one,
   and WireGuard on it could give no device an address.
 - Admin panel: an action refused because the session is no longer accepted signs out and
