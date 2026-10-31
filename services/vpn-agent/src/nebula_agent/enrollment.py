@@ -259,6 +259,7 @@ def enroll(
     control_plane_ca_file: str | None = None,
     service_group: str | None = None,
     protocol_profiles: list[str] | None = None,
+    wireguard: tuple[str, str] | None = None,
 ) -> tuple[str, str | None] | None:
     """Obtain and install this node's identity.
 
@@ -295,6 +296,13 @@ def enroll(
             "agent_host": agent_host,
             "agent_port": agent_port,
             "protocol_profiles": list(protocol_profiles or []),
+            # Without its range the control plane can hand out no WireGuard
+            # address here, and WireGuard never worked on a joined server.
+            **(
+                {"wireguard_client_pool": wireguard[0], "wireguard_gateway_address": wireguard[1]}
+                if wireguard is not None
+                else {}
+            ),
         },
         context,
     )
@@ -347,6 +355,15 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _wireguard_range(settings: object) -> tuple[str, str] | None:
+    """(client pool, gateway address) when this node serves WireGuard."""
+
+    if getattr(settings, "wg_driver", "fake") != "native":
+        return None
+    address = settings.wg_server_address  # type: ignore[attr-defined]
+    return str(settings.wg_client_pool), str(address.ip)  # type: ignore[attr-defined]
+
+
 def _served_profiles(settings: object) -> list[str]:
     """What this node will serve, so the control plane offers it at once."""
 
@@ -384,6 +401,7 @@ def main(argv: list[str] | None = None) -> int:
             control_plane_ca_file=arguments.control_plane_ca,
             service_group=arguments.service_group or None,
             protocol_profiles=_served_profiles(settings),
+            wireguard=_wireguard_range(settings),
         )
     except (EnrollmentError, OSError) as error:
         print(f"enrollment failed: {error}", file=sys.stderr)

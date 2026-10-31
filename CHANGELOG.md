@@ -11,6 +11,8 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- Enrolment sends the server's WireGuard range: before, no enrolled server had one,
+  and WireGuard on it could give no device an address.
 - Admin panel: an action refused because the session is no longer accepted signs out and
   opens the sign-in page, instead of leaving pages whose buttons all fail.
 - Approving an account request whose email or username is taken says so (409) instead of

@@ -14,6 +14,7 @@ telling somebody probing with guesses which of them had been real.
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from ipaddress import IPv4Address, IPv4Network
 from uuid import UUID, uuid4
 
 from sqlalchemy import select
@@ -135,6 +136,8 @@ class EnrollmentService:
         agent_host: str,
         agent_port: int,
         protocol_profiles: list[str] | None = None,
+        wireguard_client_pool: IPv4Network | None = None,
+        wireguard_gateway_address: IPv4Address | None = None,
         client_authority_pem: bytes | None = None,
     ) -> EnrolledNode:
         """Exchange a token for a signed certificate and a server record.
@@ -189,6 +192,12 @@ class EnrollmentService:
                 agent_host=agent_host,
                 agent_port=agent_port,
                 state=ServerState.ACTIVE.value,
+                wireguard_client_pool=(
+                    str(wireguard_client_pool) if wireguard_client_pool else None
+                ),
+                wireguard_gateway_address=(
+                    str(wireguard_gateway_address) if wireguard_gateway_address else None
+                ),
             )
             session.add(server)
             await session.flush()
