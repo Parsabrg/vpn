@@ -50,6 +50,11 @@ def make_app(admin_service: FakeAdminAuthService, *, settings: Settings | None =
         principal = await require_admin_session(request)
         return {"role": principal.role.value}
 
+    @app.post("/probe-crash")
+    async def probe_crash(request: Request) -> dict[str, str]:
+        await authorize_admin_mutation(request)
+        raise RuntimeError("an unexpected failure after the token was spent")
+
     @app.post("/probe-mutate")
     async def probe_mutate(request: Request) -> dict[str, str]:
         principal = await authorize_admin_mutation(
@@ -156,3 +161,21 @@ def test_authorize_admin_mutation_succeeds_when_stepped_up() -> None:
 
     assert response.status_code == 200
     assert response.headers["x-csrf-token"] == "v1.csrf-replacement"
+
+
+def test_a_crash_after_the_csrf_token_was_spent_still_returns_its_replacement() -> None:
+    # 2026-10-31: one 500 lost the replacement, and every later admin action
+    # was refused as "session ended" until the admin signed in again.
+    settings = Settings(env="test")
+    app = make_app(FakeAdminAuthService(step_up=True), settings=settings)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        _authenticated_cookies(client, settings)
+        response = client.post(
+            "/probe-crash",
+            headers={"Origin": ORIGIN, "X-CSRF-Token": "v1.csrf-canary"},
+            json={},
+        )
+
+    assert response.status_code == 500
+    assert response.headers["x-csrf-token"] == "v1.csrf-replacement"
+    assert "unexpected failure" not in response.text

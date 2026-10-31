@@ -5,6 +5,7 @@ export type ActionErrorCode =
   | "step_up_required"
   | "rate_limited"
   | "not_found"
+  | "conflict"
   | "signed_out"
   | "unknown";
 
@@ -51,6 +52,10 @@ export async function toActionResult<T>(
       }
       if (error.status === 404) {
         return { ok: false, code: "not_found", message: error.message };
+      }
+      // The API names the clash (e.g. a username already taken) for admins.
+      if (error.status === 409) {
+        return { ok: false, code: "conflict", message: error.message };
       }
     }
     return { ok: false, code: "unknown", message: "Something went wrong." };

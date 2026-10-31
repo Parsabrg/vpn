@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from nebula_api.accounts.email_outbox import EmailOutboxRedisClient
 from nebula_api.accounts.service import (
+    AccountRequestConflict,
     AccountRequestRateLimited,
     AccountRequestRejected,
     AccountRequestService,
@@ -291,7 +292,7 @@ def test_list_pending_returns_summaries() -> None:
 
 def test_approve_creates_user_and_activation_and_stages_email() -> None:
     request = pending_request()
-    session = ScriptedSession(scalar_values=[request])
+    session = ScriptedSession(scalar_values=[request, None])
     factory = ScriptedFactory(session)
     instance, _redis, outbox = service(factory)
 
@@ -547,7 +548,7 @@ def test_approve_logs_and_continues_when_outbox_staging_fails() -> None:
             raise ConnectionError("redis unavailable")
 
     request = pending_request()
-    session = ScriptedSession(scalar_values=[request])
+    session = ScriptedSession(scalar_values=[request, None])
     factory = ScriptedFactory(session)
     instance, _redis, _outbox = service(
         factory, outbox=cast(FakeOutboxClient, FailingOutboxClient())
@@ -763,3 +764,40 @@ class TestReissuingAnActivation:
 
         assert session.added == []
         assert session.commits == 0
+
+
+@pytest.mark.parametrize(
+    ("existing", "which"),
+    [
+        ({"email_normalized": "new-user@example.com"}, "email"),
+        (
+            {"email_normalized": "someone-else@example.com", "username_normalized": "parsa_test"},
+            "username",
+        ),
+    ],
+)
+def test_approve_refuses_a_request_whose_email_or_username_is_taken(
+    existing: dict[str, str], which: str
+) -> None:
+    # 2026-10-31: the unique constraint answered with a 500 instead.
+    request = pending_request(username="parsa_test", username_normalized="parsa_test")
+    user = User(
+        id=USER_ID, email="x@example.com", state=AccountState.ACTIVE, device_limit=3, **existing
+    )
+    session = ScriptedSession(scalar_values=[request, user])
+    instance, _redis, outbox = service(ScriptedFactory(session))
+
+    with pytest.raises(AccountRequestConflict, match=which):
+        asyncio.run(
+            instance.approve(
+                account_request_id=request.id,
+                admin_id=ADMIN_ID,
+                network_prefix="203.0.113.0/24",
+                request_id=REQUEST_ID,
+            )
+        )
+
+    assert request.state is RequestState.PENDING
+    assert not [item for item in session.added if isinstance(item, User)]
+    assert session.commits == 0
+    assert outbox.staged == []

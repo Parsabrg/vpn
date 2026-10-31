@@ -13,6 +13,7 @@ from nebula_api.accounts.schemas import (
     ActivationConfirmRequest,
 )
 from nebula_api.accounts.service import (
+    AccountRequestConflict,
     AccountRequestRateLimited,
     AccountRequestRejected,
     AccountRequestService,
@@ -72,6 +73,9 @@ def _raise_account_request_error(error: Exception) -> NoReturn:
             detail=_GENERIC_DETAIL,
             headers={"Retry-After": str(error.retry_after_seconds)},
         ) from None
+    if isinstance(error, AccountRequestConflict):
+        # Admin-only route, so naming the clash tells no outsider anything.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from None
     if isinstance(error, AuthStateUnavailable):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

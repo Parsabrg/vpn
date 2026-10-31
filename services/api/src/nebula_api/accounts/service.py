@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,10 @@ _LOGGER = logging.getLogger(__name__)
 
 class AccountRequestRejected(Exception):
     """Stable denial for invalid, expired, or already-decided requests."""
+
+
+class AccountRequestConflict(AccountRequestRejected):
+    """The request's email or username already belongs to an account."""
 
 
 class AccountRequestRateLimited(AccountRequestRejected):
@@ -230,6 +234,22 @@ class AccountRequestService:
                 account_request.expires_at <= now
             ):
                 raise AccountRequestRejected("Request was not accepted")
+
+            # Checked here rather than left to the unique constraints: their
+            # IntegrityError was a 500, and the admin saw "session ended".
+            taken = [User.email_normalized == account_request.email_normalized]
+            if account_request.username_normalized is not None:
+                taken.append(User.username_normalized == account_request.username_normalized)
+            existing = await session.scalar(select(User).where(or_(*taken)).limit(1))
+            if existing is not None:
+                which = (
+                    "email"
+                    if existing.email_normalized == account_request.email_normalized
+                    else "username"
+                )
+                raise AccountRequestConflict(
+                    f"An account with this {which} already exists. Reject this request."
+                )
 
             user_id = uuid4()
             session.add(
