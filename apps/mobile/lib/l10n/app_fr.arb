@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "Refusé ; la dernière liste est conservée",
   "freeSubscriptionTooLarge": "La liste est trop volumineuse",
   "freeSubscriptionEmpty": "Aucune connexion utilisable par cette app",
-  "freeSubscriptionNotYet": "Pas encore récupérée"
+  "freeSubscriptionNotYet": "Pas encore récupérée",
+
+  "change": "Modifier",
+  "changePasswordTitle": "Modifier le mot de passe",
+  "fieldCurrentPassword": "Mot de passe actuel",
+  "changePasswordIntro": "Vous restez connecté ici. Tous les autres appareils sont déconnectés.",
+  "changePasswordAction": "Modifier le mot de passe",
+  "changingPassword": "Modification",
+  "passwordChanged": "Mot de passe modifié. Les autres appareils ont été déconnectés.",
+  "passwordNotAccepted": "Ce n'est pas votre mot de passe.",
+  "deleteAccountRow": "Supprimer le compte",
+  "deleteAccountTitle": "Supprimer le compte",
+  "deleteAccountIntro": "Votre compte est supprimé immédiatement, sans retour possible. Votre e-mail, nom d'utilisateur, mot de passe, appareils et liens de connexion sont supprimés, et votre accès VPN est retiré de tous les serveurs.",
+  "deleteAccountKept": "Les totaux d'utilisation et le journal de sécurité sont conservés sous un numéro aléatoire qui n'est pas lié à vous. Les sauvegardes gardent les anciennes données jusqu'à 30 jours.",
+  "deleteAccountAction": "Supprimer mon compte",
+  "deletingAccount": "Suppression",
+  "accountDeleted": "Votre compte a été supprimé."
 }

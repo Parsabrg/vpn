@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "Geweigerd; de laatste lijst blijft",
   "freeSubscriptionTooLarge": "De lijst is te groot om te lezen",
   "freeSubscriptionEmpty": "Geen verbinding die deze app kan gebruiken",
-  "freeSubscriptionNotYet": "Nog niet opgehaald"
+  "freeSubscriptionNotYet": "Nog niet opgehaald",
+
+  "change": "Wijzigen",
+  "changePasswordTitle": "Wachtwoord wijzigen",
+  "fieldCurrentPassword": "Huidig wachtwoord",
+  "changePasswordIntro": "Je blijft hier ingelogd. Alle andere apparaten worden uitgelogd.",
+  "changePasswordAction": "Wachtwoord wijzigen",
+  "changingPassword": "Bezig met wijzigen",
+  "passwordChanged": "Wachtwoord gewijzigd. Andere apparaten zijn uitgelogd.",
+  "passwordNotAccepted": "Dat is niet je wachtwoord.",
+  "deleteAccountRow": "Account verwijderen",
+  "deleteAccountTitle": "Account verwijderen",
+  "deleteAccountIntro": "Hiermee wordt je account direct en definitief verwijderd. Je e-mail, gebruikersnaam, wachtwoord, apparaten en inloglinks worden verwijderd, en je VPN-toegang wordt van alle servers gehaald.",
+  "deleteAccountKept": "Verbruikstotalen en het beveiligingslog blijven bewaard onder een willekeurig nummer dat niet aan jou gekoppeld is. Back-ups bewaren de oude gegevens tot 30 dagen.",
+  "deleteAccountAction": "Mijn account verwijderen",
+  "deletingAccount": "Bezig met verwijderen",
+  "accountDeleted": "Je account is verwijderd."
 }

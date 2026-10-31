@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "Отказано; последний список сохранён",
   "freeSubscriptionTooLarge": "Список слишком большой",
   "freeSubscriptionEmpty": "Нет подключений, которые приложение может использовать",
-  "freeSubscriptionNotYet": "Ещё не загружено"
+  "freeSubscriptionNotYet": "Ещё не загружено",
+
+  "change": "Изменить",
+  "changePasswordTitle": "Изменить пароль",
+  "fieldCurrentPassword": "Текущий пароль",
+  "changePasswordIntro": "На этом устройстве вы останетесь в аккаунте. На всех остальных будет выполнен выход.",
+  "changePasswordAction": "Изменить пароль",
+  "changingPassword": "Изменение",
+  "passwordChanged": "Пароль изменён. На других устройствах выполнен выход.",
+  "passwordNotAccepted": "Это не ваш пароль.",
+  "deleteAccountRow": "Удалить аккаунт",
+  "deleteAccountTitle": "Удалить аккаунт",
+  "deleteAccountIntro": "Аккаунт будет удалён сразу и безвозвратно. Удаляются ваша почта, имя пользователя, пароль, устройства и ссылки для входа, а доступ к VPN убирается со всех серверов.",
+  "deleteAccountKept": "Итоги трафика и журнал безопасности сохраняются под случайным номером, не связанным с вами. Резервные копии хранят старые данные до 30 дней.",
+  "deleteAccountAction": "Удалить мой аккаунт",
+  "deletingAccount": "Удаление",
+  "accountDeleted": "Ваш аккаунт удалён."
 }

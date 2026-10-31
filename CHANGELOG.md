@@ -8,6 +8,8 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 ## Unreleased
 
 ### Apps
+- Account: change your password, or delete your account. Deletion removes everything
+  that names you, and your VPN access on every server; see docs/privacy.md.
 - Signing in tells the phone's password manager it worked, so it offers to save the
   password, or to update a saved one that changed; a refused password is never saved.
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).

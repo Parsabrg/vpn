@@ -388,5 +388,21 @@
   "freeSubscriptionRefused": "被拒绝；保留上次的列表",
   "freeSubscriptionTooLarge": "列表太大，无法读取",
   "freeSubscriptionEmpty": "其中没有本应用可用的连接",
-  "freeSubscriptionNotYet": "尚未获取"
+  "freeSubscriptionNotYet": "尚未获取",
+
+  "change": "更改",
+  "changePasswordTitle": "更改密码",
+  "fieldCurrentPassword": "当前密码",
+  "changePasswordIntro": "此设备将保持登录，其他所有设备将被退出。",
+  "changePasswordAction": "更改密码",
+  "changingPassword": "正在更改",
+  "passwordChanged": "密码已更改，其他设备已退出登录。",
+  "passwordNotAccepted": "密码不正确。",
+  "deleteAccountRow": "删除账户",
+  "deleteAccountTitle": "删除账户",
+  "deleteAccountIntro": "这将立即删除你的账户，且无法撤销。你的邮箱、用户名、密码、设备和登录链接都会被删除，你的 VPN 访问权限会从所有服务器上移除。",
+  "deleteAccountKept": "流量统计和安全日志会以一个与你无关的随机编号保留。备份中的旧数据最多保留 30 天。",
+  "deleteAccountAction": "删除我的账户",
+  "deletingAccount": "正在删除",
+  "accountDeleted": "你的账户已删除。"
 }

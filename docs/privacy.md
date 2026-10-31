@@ -70,10 +70,23 @@ in the platform's secure storage where they are secrets.
 
 - See and revoke your devices under Devices.
 - Turn off "Check for updates" in Settings.
-- To have your account and its data deleted, ask the person who runs your
-  server. A delete-my-account button in the app is planned (roadmap,
-  section 59); until then an administrator removes it, and backups holding
-  it expire within 30 days.
+- Change your password under Account. You stay signed in on this device;
+  every other device is signed out.
+- Delete your account under Account, with your password. This happens at
+  once and cannot be undone:
+  - **Deleted:** your email address, username and password; your devices'
+    names and hardware IDs; every session, sign-in token, activation and
+    password-reset link; your original account request; every email queued
+    for or sent to your address; your permissions and server assignments.
+  - **Removed from every server:** your WireGuard, Xray and Hysteria2
+    credentials (within about a minute; an unreachable server removes them
+    when it is back).
+  - **Kept, under a random number that is not linked to you:** audit log
+    entries and traffic totals. The deletion's own audit entry does not
+    contain your address.
+  - **Backups** still hold the old data until they expire, within 30 days.
+  - An email already on its way when you delete may still arrive; its copy
+    on the server expires within 24 hours and is never sent once deleted.
 
 ## A server's operator
 

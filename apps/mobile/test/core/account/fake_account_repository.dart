@@ -58,4 +58,29 @@ class FakeAccountRepository implements AccountRepository {
       );
     }
   }
+
+  /// What was asked of the password change and deletion, in order.
+  final List<String> securityCalls = <String>[];
+  Object? securityError;
+
+  @override
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    securityCalls.add('change:$currentPassword>$newPassword');
+    final Object? error = securityError;
+    if (error != null) {
+      throw error;
+    }
+  }
+
+  @override
+  Future<void> deleteAccount(String password) async {
+    securityCalls.add('delete:$password');
+    final Object? error = securityError;
+    if (error != null) {
+      throw error;
+    }
+  }
 }
