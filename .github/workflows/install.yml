@@ -107,7 +107,8 @@ jobs:
         # connects, then a page fetched through the app's own client config.
         # WireGuard once had no address range on an enrolled server and carried
         # nothing while every service looked healthy (2026-10-31).
-        run: sudo python3 infrastructure/check-protocols.py
+        # Xray 26.10 trusts only its own roots, so it is handed the CI certificate.
+        run: sudo NEBULA_CHECK_CA=/usr/local/share/ca-certificates/nebula-ci.crt python3 infrastructure/check-protocols.py
       - name: Admin allowlist closes the panel and admin API, not the app's API
         run: |
           set -eu

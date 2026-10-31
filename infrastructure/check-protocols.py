@@ -17,6 +17,7 @@ Stdlib only; needs docker, xray, wg, ip and curl, all present after install.sh.
 
 import ipaddress
 import json
+import os
 import ssl
 import subprocess
 import sys
@@ -27,6 +28,9 @@ import uuid
 from pathlib import Path
 
 PAGE = "https://www.cloudflare.com/cdn-cgi/trace"
+# The CA behind this server's certificate when it is not a public one (the
+# install test's self-signed certificate): NEBULA_CHECK_CA=<file>.
+CA_FILE = os.environ.get("NEBULA_CHECK_CA", "")
 POSTGRES = "nebula-production-postgres-1"
 API = "nebula-production-api-1"
 
@@ -109,6 +113,12 @@ def xray_outbound(answer: dict[str, object], client_uuid: str) -> dict[str, obje
         stream["grpcSettings"] = {"serviceName": answer["service_name"]}
     if answer["transport_security"] == "tls":
         stream["tlsSettings"] = {"serverName": sni}
+        # Xray 26.10 checks only its own roots, not the system's: an
+        # installation with its own CA hands it over, as the app does.
+        if CA_FILE:
+            stream["tlsSettings"]["certificates"] = [  # type: ignore[index]
+                {"usage": "verify", "certificateFile": CA_FILE}
+            ]
     protocol = answer.get("protocol", "vless")
     if protocol == "shadowsocks":
         settings: dict[str, object] = {
