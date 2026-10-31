@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
@@ -58,6 +59,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
             platform: currentDevicePlatform,
             clientVersion: kClientVersion,
           );
+      // Tells the password manager the sign-in worked: it offers to save the
+      // password, or to update a saved one that differs. Without this it was
+      // never asked, and saved once only by chance (2026-10-31).
+      TextInput.finishAutofillContext();
     } catch (error) {
       if (mounted) {
         setState(
@@ -81,101 +86,110 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     final bool sessionExpired = authState is AuthSessionExpired;
     final Pairing? pairing = ref.watch(pairingProvider);
 
-    return Form(
-      key: _formKey,
-      child: AuthScaffold(
-        title: text.signInTitle,
-        subline: sessionExpired ? text.signInSessionEnded : text.signInSubline,
-        errorMessage: _errorMessage,
-        fields: <Widget>[
-          TextFormField(
-            controller: _identifierController,
-            autofillHints: const <String>[
-              AutofillHints.username,
-              AutofillHints.email,
-            ],
-            decoration: InputDecoration(hintText: text.fieldEmailOrUsername),
-            validator: (String? value) =>
-                (value == null || value.trim().isEmpty)
-                ? text.validateEmailOrUsername
-                : null,
-          ),
-          PasswordField(
-            controller: _passwordController,
-            labelText: text.fieldPassword,
-            autofillHints: const <String>[AutofillHints.password],
-            validator: (String? value) =>
-                (value == null || value.isEmpty) ? text.validatePassword : null,
-          ),
-        ],
-        aboveAction: Align(
-          alignment: AlignmentDirectional.centerEnd,
-          child: TextButton(
-            onPressed: () => context.push(RoutePaths.passwordReset),
-            child: Text(text.forgotPassword),
-          ),
-        ),
-        action: PanelCta(
-          label: _submitting ? text.signingIn : text.continueAction,
-          onPressed: _submitting ? null : _submit,
-        ),
-        // One row, not two stacked full-width buttons. These are the two ways
-        // in for someone who cannot sign in yet, and neither deserves the
-        // weight of a button as wide as the primary action.
-        footer: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                TextButton(
-                  onPressed: () => context.push(RoutePaths.accountRequest),
-                  child: Text(text.requestAccess),
-                ),
-                Text(
-                  '·',
-                  style: context.type.listMeta.copyWith(
-                    color: context.palette.textMuted,
-                  ),
-                ),
-                // Without this the activation screen is unreachable: the route
-                // exists and is registered, but nothing navigated to it, so an
-                // approved user holding an activation code had no way to spend it
-                // and was left at a sign-in form asking for a password they had
-                // never been able to set.
-                TextButton(
-                  onPressed: () => context.push(RoutePaths.activate),
-                  child: Text(text.haveACode),
-                ),
+    // One form for the password manager, so it pairs the username with the
+    // password. Leaving the screen any other way saves nothing: a wrong
+    // password must never replace a saved one.
+    return AutofillGroup(
+      onDisposeAction: AutofillContextAction.cancel,
+      child: Form(
+        key: _formKey,
+        child: AuthScaffold(
+          title: text.signInTitle,
+          subline: sessionExpired
+              ? text.signInSessionEnded
+              : text.signInSubline,
+          errorMessage: _errorMessage,
+          fields: <Widget>[
+            TextFormField(
+              controller: _identifierController,
+              autofillHints: const <String>[
+                AutofillHints.username,
+                AutofillHints.email,
               ],
+              decoration: InputDecoration(hintText: text.fieldEmailOrUsername),
+              validator: (String? value) =>
+                  (value == null || value.trim().isEmpty)
+                  ? text.validateEmailOrUsername
+                  : null,
             ),
-            TextButton(
-              onPressed: () => ref.read(freeModeProvider.notifier).enter(),
-              child: Text(text.freeEnter),
+            PasswordField(
+              controller: _passwordController,
+              labelText: text.fieldPassword,
+              autofillHints: const <String>[AutofillHints.password],
+              validator: (String? value) => (value == null || value.isEmpty)
+                  ? text.validatePassword
+                  : null,
             ),
-            if (pairing?.deploymentName != null)
-              // Which deployment this is, checked against what the person
-              // expects before they type a password into it.
+          ],
+          aboveAction: Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton(
+              onPressed: () => context.push(RoutePaths.passwordReset),
+              child: Text(text.forgotPassword),
+            ),
+          ),
+          action: PanelCta(
+            label: _submitting ? text.signingIn : text.continueAction,
+            onPressed: _submitting ? null : _submit,
+          ),
+          // One row, not two stacked full-width buttons. These are the two ways
+          // in for someone who cannot sign in yet, and neither deserves the
+          // weight of a button as wide as the primary action.
+          footer: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: <Widget>[
-                  Flexible(
-                    child: Text(
-                      text.pairedServer(pairing!.deploymentName!),
-                      overflow: TextOverflow.ellipsis,
-                      style: context.type.listMeta.copyWith(
-                        color: context.palette.textMuted,
-                      ),
+                  TextButton(
+                    onPressed: () => context.push(RoutePaths.accountRequest),
+                    child: Text(text.requestAccess),
+                  ),
+                  Text(
+                    '·',
+                    style: context.type.listMeta.copyWith(
+                      color: context.palette.textMuted,
                     ),
                   ),
+                  // Without this the activation screen is unreachable: the route
+                  // exists and is registered, but nothing navigated to it, so an
+                  // approved user holding an activation code had no way to spend it
+                  // and was left at a sign-in form asking for a password they had
+                  // never been able to set.
                   TextButton(
-                    onPressed: () =>
-                        ref.read(pairingProvider.notifier).forget(),
-                    child: Text(text.changeServer),
+                    onPressed: () => context.push(RoutePaths.activate),
+                    child: Text(text.haveACode),
                   ),
                 ],
               ),
-          ],
+              TextButton(
+                onPressed: () => ref.read(freeModeProvider.notifier).enter(),
+                child: Text(text.freeEnter),
+              ),
+              if (pairing?.deploymentName != null)
+                // Which deployment this is, checked against what the person
+                // expects before they type a password into it.
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    Flexible(
+                      child: Text(
+                        text.pairedServer(pairing!.deploymentName!),
+                        overflow: TextOverflow.ellipsis,
+                        style: context.type.listMeta.copyWith(
+                          color: context.palette.textMuted,
+                        ),
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () =>
+                          ref.read(pairingProvider.notifier).forget(),
+                      child: Text(text.changeServer),
+                    ),
+                  ],
+                ),
+            ],
+          ),
         ),
       ),
     );
