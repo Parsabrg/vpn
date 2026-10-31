@@ -7,16 +7,18 @@ not survive "add a second VPS", which is the whole point of enrollment -- a
 new node has to be able to obtain an identity the control plane will accept,
 over the network, without an operator generating anything.
 
-So the deployment becomes a CA. One CA for both directions of the agent link,
-because both ends are ours:
+So the deployment becomes a CA -- two of them, one per direction:
 
-    API (client cert) ----mTLS----> agent (server cert)
-         signed by CA                  signed by CA
-         trusts CA for the server      trusts CA for the client
+    API (client cert) -------mTLS-------> agent (server cert)
+      signed by the control-plane CA        signed by the node CA
+      trusts the node CA                    trusts the control-plane CA
 
-The alternative, two CAs, buys separation between two identities that are
-already issued by the same authority to the same operator's machines, at the
-cost of twice the material to keep straight.
+Two, because one was not enough: with a single CA every node holds a
+certificate from the authority the agents trust for clients, so a server
+taken over could call every other server's agent as the control plane. The
+control-plane CA signs exactly one certificate, and an agent that trusts only
+it refuses every node certificate, old copies included (there is no
+revocation list to rely on).
 
 The CA key never leaves the control plane. A node proves it holds a valid
 enrollment token, sends a certificate request, and receives a signed
@@ -37,6 +39,7 @@ from pathlib import Path
 from typing import Literal
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
@@ -76,7 +79,9 @@ class CertificateAuthority:
         return self.certificate.public_bytes(serialization.Encoding.PEM)
 
 
-def create_certificate_authority(*, deployment_name: str) -> tuple[bytes, bytes]:
+def create_certificate_authority(
+    *, deployment_name: str, role: str = "node CA"
+) -> tuple[bytes, bytes]:
     """A new self-signed CA, returned as (certificate PEM, private key PEM).
 
     Named after the deployment so an operator looking at a certificate on a
@@ -88,7 +93,7 @@ def create_certificate_authority(*, deployment_name: str) -> tuple[bytes, bytes]
     now = dt.datetime.now(dt.UTC)
     subject = x509.Name(
         [
-            x509.NameAttribute(NameOID.COMMON_NAME, f"{deployment_name} node CA"),
+            x509.NameAttribute(NameOID.COMMON_NAME, f"{deployment_name} {role}"),
             x509.NameAttribute(NameOID.ORGANIZATION_NAME, "Nebula"),
         ]
     )
@@ -142,6 +147,29 @@ def load_certificate_authority(certificate_path: Path, key_path: Path) -> Certif
     if not isinstance(key, ec.EllipticCurvePrivateKey):
         raise PkiError("the deployment certificate authority key is not an EC key")
     return CertificateAuthority(certificate=certificate, private_key=key)
+
+
+def issuing_authority_pem(certificate_path: Path, authorities: list[Path]) -> bytes | None:
+    """The PEM of whichever of [authorities] signed the certificate at
+    [certificate_path], or None if none did (or a file is missing).
+
+    Enrolment hands a node the authority that issued the control plane's
+    client certificate, so a node enrolled before or after the control plane
+    moved to its own authority trusts what the control plane presents.
+    """
+
+    try:
+        certificate = x509.load_pem_x509_certificate(certificate_path.read_bytes())
+    except (OSError, ValueError):
+        return None
+    for path in authorities:
+        try:
+            authority = x509.load_pem_x509_certificate(path.read_bytes())
+            certificate.verify_directly_issued_by(authority)
+        except (OSError, ValueError, TypeError, InvalidSignature):
+            continue
+        return authority.public_bytes(serialization.Encoding.PEM)
+    return None
 
 
 def sign_node_certificate(

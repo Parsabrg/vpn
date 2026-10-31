@@ -632,18 +632,8 @@ OpenSSL then refuses a server's certificate presented as a client
 ("unsuitable certificate purpose"), so a server that is taken over cannot call
 the other servers' agents as the control plane.
 
-Certificates issued before then carry both usages and keep working; they lose
-the protection only until they are re-issued:
-
-1. **The control plane's client certificate.** Back up, then remove it and
-   its key from the state volume (`agent_client_certificate` and
-   `agent_client_key` under `/var/lib/nebula`) and recreate the `api` and `usage` containers: the
-   entrypoint issues a new, client-only one from the node CA.
-2. **Each agent's certificate.** Re-enrol the server (Add server, then
-   `install.sh --join`), or sign a new one from the node CA with
-   `usage="server"` and install it as `agent_tls_cert`/`agent_tls_key` the way
-   the one-CA move above did, then restart `nebula-vpn-agent`.
-
-Check afterwards with `nebula-api collect-usage`: "Polled N server(s),
-0 unreachable".
+Certificates issued before then carry both usages. Since 2026-10-31 the
+control plane also has a CA of its own that agents trust instead of the node
+CA, so even those stop working as callers. Moving an existing installation
+over, step by step: [agent-certificates.md](agent-certificates.md).
 

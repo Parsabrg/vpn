@@ -140,7 +140,9 @@ def read_deployment_secret(path: Path) -> bytes:
     return data
 
 
-def ensure_node_authority(certificate_path: Path, key_path: Path, *, deployment_name: str) -> bool:
+def ensure_node_authority(
+    certificate_path: Path, key_path: Path, *, deployment_name: str, role: str = "node CA"
+) -> bool:
     """Generate the node certificate authority if there is none.
 
     Returns whether it was created. Never replaces an existing one: every
@@ -163,11 +165,13 @@ def ensure_node_authority(certificate_path: Path, key_path: Path, *, deployment_
             "one of its certificate and key exists without the other"
         )
 
-    certificate_pem, key_pem = create_certificate_authority(deployment_name=deployment_name)
+    certificate_pem, key_pem = create_certificate_authority(
+        deployment_name=deployment_name, role=role
+    )
     write_certificate(certificate_path, certificate_pem)
     write_private_key(key_path, key_pem)
     # The path, never the key.
-    _LOGGER.info("generated a node certificate authority at %s", certificate_path)
+    _LOGGER.info("generated a %s at %s", role, certificate_path)
     return True
 
 
@@ -222,6 +226,41 @@ def ensure_control_plane_identity(
     write_certificate(certificate_path, certificate_pem)
     _LOGGER.info("issued the control plane's client certificate at %s", certificate_path)
     return True
+
+
+def rotate_control_plane_identity(
+    certificate_path: Path,
+    key_path: Path,
+    *,
+    authority_certificate_path: Path,
+    authority_key_path: Path,
+) -> Path:
+    """Move the control plane's client certificate aside and issue a new one
+    from [authority]. Returns where the old certificate went.
+
+    For an installation whose certificate came from the node CA: once every
+    agent also trusts the control-plane CA, this moves the control plane onto
+    it (docs/runbooks/agent-certificates.md). The old pair is kept, renamed,
+    so going back is two moves.
+    """
+
+    old_certificate = certificate_path.with_name(certificate_path.name + ".old")
+    old_key = key_path.with_name(key_path.name + ".old")
+    if old_certificate.exists() or old_key.exists():
+        raise RuntimeError(
+            f"{old_certificate} is still there from an earlier rotation; "
+            "remove it once every agent works with the current certificate"
+        )
+    load_certificate_authority(authority_certificate_path, authority_key_path)
+    certificate_path.rename(old_certificate)
+    key_path.rename(old_key)
+    ensure_control_plane_identity(
+        certificate_path,
+        key_path,
+        authority_certificate_path=authority_certificate_path,
+        authority_key_path=authority_key_path,
+    )
+    return old_certificate
 
 
 async def has_administrator(session_factory: SessionFactory) -> bool:

@@ -25,7 +25,7 @@ from nebula_api.enrollment.schemas import (
 )
 from nebula_api.enrollment.service import EnrollmentRejected, EnrollmentService
 from nebula_api.models.types import AdminRole
-from nebula_api.pki import PkiError, load_certificate_authority
+from nebula_api.pki import PkiError, issuing_authority_pem, load_certificate_authority
 from nebula_api.settings import Settings
 
 router = APIRouter(prefix="/v1/nodes", tags=["nodes"])
@@ -68,11 +68,20 @@ async def enroll_node(
             detail="Node enrollment is temporarily unavailable",
         ) from None
 
+    # What the node will trust for clients: the authority behind the control
+    # plane's certificate -- its own CA, or the node CA on an installation
+    # that has not rotated yet (docs/runbooks/agent-certificates.md).
+    client_authority = issuing_authority_pem(
+        settings.resolved_agent_client_cert_file,
+        [settings.resolved_client_ca_certificate_file, settings.resolved_node_ca_certificate_file],
+    )
+
     try:
         enrolled = await service.redeem(
             token=payload.token,
             csr_pem=payload.certificate_request.encode("ascii", errors="strict"),
             authority=authority,
+            client_authority_pem=client_authority,
             public_host=payload.public_host,
             agent_host=payload.agent_host,
             agent_port=payload.agent_port,
