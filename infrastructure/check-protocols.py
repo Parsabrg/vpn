@@ -170,13 +170,25 @@ def check_xray(agent: Agent, code: str, workdir: Path, socks_port: int) -> str:
             path = workdir / f"{code}.json"
             path.write_text(json.dumps(config))
             command = ["xray", "run", "-config", str(path)]
-        client = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        try:
-            time.sleep(2)
-            return fetch(proxy=f"127.0.0.1:{socks_port}")
-        finally:
-            client.terminate()
-            client.wait(timeout=10)
+        log = workdir / f"{code}.log"
+        with log.open("w") as sink:
+            client = subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT)
+            try:
+                time.sleep(2)
+                outcome = fetch(proxy=f"127.0.0.1:{socks_port}")
+            finally:
+                client.terminate()
+                client.wait(timeout=10)
+        if not outcome.startswith("ip="):
+            # Enough to tell a name, address or certificate problem apart.
+            shown = {k: answer.get(k) for k in ("server_address", "port", "sni", "transport")}
+            errors = [
+                line.strip()
+                for line in log.read_text().splitlines()
+                if any(word in line.lower() for word in ("error", "fail", "x509", "certificate"))
+            ]
+            outcome += f"\n       answer {shown}\n       " + "\n       ".join(errors[-3:])
+        return outcome
     finally:
         agent.post(
             "/v1/xray-operations/revoke-client",
