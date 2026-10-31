@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { assignServer, grantPermissions } from "@/lib/access-actions";
+import { endedSession } from "@/lib/end-session";
 
 /**
  * Says when a user cannot connect yet, and fixes it in one click. Approving
@@ -30,12 +31,17 @@ export function AccessReadiness({
     return null;
   }
 
-  async function run(step: () => Promise<{ ok: boolean; message?: string }>) {
+  async function run(
+    step: () => Promise<{ ok: boolean; code?: string; message?: string }>,
+  ) {
     setPending(true);
     setError(null);
     const result = await step();
     setPending(false);
     if (!result.ok) {
+      if (endedSession(result)) {
+        return;
+      }
       setError(result.message ?? "Something went wrong.");
       return;
     }
