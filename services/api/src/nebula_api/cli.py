@@ -19,6 +19,7 @@ from uuid import UUID
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -38,10 +39,17 @@ from nebula_api.bootstrap import (
     ensure_deployment_secret,
     ensure_node_authority,
     has_administrator,
+    rotate_control_plane_identity,
 )
 from nebula_api.db.engine import create_database_engine, create_session_factory
 from nebula_api.db.schema import SCHEMA_HEAD, schema_is_current
-from nebula_api.enrollment.service import EnrollmentService
+from nebula_api.enrollment.service import EnrollmentService, certificate_hostnames
+from nebula_api.models.topology import VPNServer
+from nebula_api.pki import (
+    issuing_authority_pem,
+    load_certificate_authority,
+    sign_node_certificate,
+)
 from nebula_api.provisioning.key_audit import audit_credential_keys
 from nebula_api.provisioning.reconciliation import (
     ReconciliationSummary,
@@ -363,6 +371,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate_symmetric_key.add_argument("--out", required=True, type=Path)
 
+    commands.add_parser(
+        "rotate-control-plane-certificate",
+        help="issue the control plane's client certificate from its own CA, keeping the old one",
+    )
+    sign_server = commands.add_parser(
+        "sign-server-certificate",
+        help="sign a new certificate request for an enrolled server; prints the certificate",
+    )
+    sign_server.add_argument("--server", required=True, help="the server's code")
+    sign_server.add_argument("--csr", required=True, type=Path)
+
     audit_verify = commands.add_parser(
         "audit-verify",
         help="check an audit log export's hash chain, and that it extends an older export",
@@ -392,6 +411,50 @@ def run_audit_verify(export: Path, extends: Path | None) -> int:
         print(
             f"intact, and contains {extends} unchanged: {summary.count} events, head {summary.head}"
         )
+    return 0
+
+
+def run_rotate_control_plane_certificate() -> int:
+    """Move the control plane onto its own CA; see agent-certificates.md."""
+
+    settings = Settings()
+    old = rotate_control_plane_identity(
+        settings.resolved_agent_client_cert_file,
+        settings.resolved_agent_client_key_file,
+        authority_certificate_path=settings.resolved_client_ca_certificate_file,
+        authority_key_path=settings.resolved_client_ca_key_file,
+    )
+    print(f"issued from the control-plane CA; the old certificate is {old}")
+    print("restart api, worker and usage to present it")
+    return 0
+
+
+async def run_sign_server_certificate(code: str, csr_pem: bytes) -> int:
+    """A server certificate for an enrolled server, from a request made on it.
+
+    Names come from the server's record, as at enrolment, never from the
+    request. Re-issues a node's certificate without a new enrolment.
+    """
+
+    settings = Settings()
+    authority = load_certificate_authority(
+        settings.resolved_node_ca_certificate_file, settings.resolved_node_ca_key_file
+    )
+    engine = _build_engine(settings)
+    try:
+        async with create_session_factory(engine)() as session:
+            server = await session.scalar(select(VPNServer).where(VPNServer.code == code))
+    finally:
+        await engine.dispose()
+    if server is None:
+        raise ValueError(f"no server with code {code!r}")
+    certificate = sign_node_certificate(
+        authority,
+        csr_pem,
+        common_name=server.code,
+        hostnames=certificate_hostnames(server.public_host, server.agent_host),
+    )
+    sys.stdout.write(certificate.decode("ascii"))
     return 0
 
 
@@ -962,11 +1025,27 @@ async def run_initialize(*, name: str | None, admin_email: str | None) -> int:
         # control plane talk to the nodes it enrols, and a deployment that
         # generated a CA but never issued itself a client certificate fails
         # at the first handshake with the agent rather than here.
+        created_client_authority = ensure_node_authority(
+            settings.resolved_client_ca_certificate_file,
+            settings.resolved_client_ca_key_file,
+            deployment_name=deployment_name,
+            role="control-plane CA",
+        )
         created_client = ensure_control_plane_identity(
             settings.resolved_agent_client_cert_file,
             settings.resolved_agent_client_key_file,
-            authority_certificate_path=settings.resolved_node_ca_certificate_file,
-            authority_key_path=settings.resolved_node_ca_key_file,
+            authority_certificate_path=settings.resolved_client_ca_certificate_file,
+            authority_key_path=settings.resolved_client_ca_key_file,
+        )
+        # An installation from before the control-plane CA keeps its node-CA
+        # certificate until an operator rotates it: switching here would cut
+        # off every agent that does not trust the new CA yet.
+        on_own_authority = (
+            issuing_authority_pem(
+                settings.resolved_agent_client_cert_file,
+                [settings.resolved_client_ca_certificate_file],
+            )
+            is not None
         )
         administrator_exists = await has_administrator(session_factory)
     finally:
@@ -977,7 +1056,13 @@ async def run_initialize(*, name: str | None, admin_email: str | None) -> int:
     print(f"  identity: {'generated now' if created_deployment else 'already existed'}")
     print(f"  secret:   {'generated now' if created_secret else 'already existed'}")
     print(f"  node CA:  {'generated now' if created_authority else 'already existed'}")
+    print(f"  client CA: {'generated now' if created_client_authority else 'already existed'}")
     print(f"  client:   {'issued now' if created_client else 'already existed'}")
+    if not on_own_authority:
+        print(
+            "  client:   from the node CA; move it to the control-plane CA "
+            "(docs/runbooks/agent-certificates.md)"
+        )
 
     if administrator_exists:
         print("  admin:    an administrator account already exists")
@@ -1477,6 +1562,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if arguments.command == "audit-verify":
             return run_audit_verify(arguments.export, arguments.extends)
+        if arguments.command == "rotate-control-plane-certificate":
+            return run_rotate_control_plane_certificate()
+        if arguments.command == "sign-server-certificate":
+            return asyncio.run(
+                run_sign_server_certificate(arguments.server, arguments.csr.read_bytes())
+            )
     except UserNotFound as missing:
         # Named rather than folded into the generic handler: "no account with
         # that address" is almost always a typo the operator can fix, and is

@@ -267,3 +267,54 @@ def test_adding_a_server_from_the_panel_needs_an_admin(tmp_path: Path) -> None:
         response = client.post("/v1/admin/nodes/enrollment-tokens", json={"label": "node-02"})
 
     assert response.status_code in (401, 403)
+
+
+def _enrolled() -> EnrolledNode:
+    return EnrolledNode(
+        server_id=uuid4(), label="node-02", certificate_pem="c", ca_certificate_pem="a"
+    )
+
+
+def test_a_node_trusts_the_control_plane_ca_once_the_control_plane_uses_it(
+    tmp_path: Path,
+) -> None:
+    from nebula_api.bootstrap import ensure_control_plane_identity, ensure_node_authority
+
+    ensure_node_authority(
+        tmp_path / "client_ca_certificate",
+        tmp_path / "client_ca_key",
+        deployment_name="Frankfurt",
+        role="control-plane CA",
+    )
+    ensure_control_plane_identity(
+        tmp_path / "agent_client_certificate",
+        tmp_path / "agent_client_key",
+        authority_certificate_path=tmp_path / "client_ca_certificate",
+        authority_key_path=tmp_path / "client_ca_key",
+    )
+    service = FakeEnrollmentService(_enrolled())
+    with make_client(tmp_path, service) as client:
+        assert client.post("/v1/nodes/enroll", json=_body()).status_code == 200
+
+    assert service.calls[0]["client_authority_pem"] == (
+        (tmp_path / "client_ca_certificate").read_bytes()
+    )
+
+
+def test_before_rotating_a_node_still_trusts_the_node_ca(tmp_path: Path) -> None:
+    from nebula_api.bootstrap import ensure_control_plane_identity
+
+    _write_authority(tmp_path)
+    ensure_control_plane_identity(
+        tmp_path / "agent_client_certificate",
+        tmp_path / "agent_client_key",
+        authority_certificate_path=tmp_path / "node_ca_certificate",
+        authority_key_path=tmp_path / "node_ca_key",
+    )
+    service = FakeEnrollmentService(_enrolled())
+    with make_client(tmp_path, service, omit_authority=True) as client:
+        assert client.post("/v1/nodes/enroll", json=_body()).status_code == 200
+
+    assert service.calls[0]["client_authority_pem"] == (
+        (tmp_path / "node_ca_certificate").read_bytes()
+    )

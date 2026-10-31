@@ -24,6 +24,7 @@ from nebula_api.pki import (
     PkiError,
     create_certificate_authority,
     create_certificate_request,
+    issuing_authority_pem,
     load_certificate_authority,
     sign_node_certificate,
     write_certificate,
@@ -295,7 +296,12 @@ def test_a_generated_request_carries_an_ec_key() -> None:
 
 
 def _handshake(
-    tmp_path: Path, authority: CertificateAuthority, client_usage: Literal["server", "client"]
+    tmp_path: Path,
+    authority: CertificateAuthority,
+    client_usage: Literal["server", "client"],
+    *,
+    caller_authority: CertificateAuthority | None = None,
+    agent_trusts: list[CertificateAuthority] | None = None,
 ) -> bool:
     """A TLS handshake the way the agent runs it (serve.py: CERT_REQUIRED
     against the node CA), with the caller presenting a certificate of
@@ -305,22 +311,27 @@ def _handshake(
     import ssl
     import threading
 
-    def issue(name: str, usage: Literal["server", "client"]) -> tuple[Path, Path]:
+    def issue(
+        name: str, usage: Literal["server", "client"], signer: CertificateAuthority
+    ) -> tuple[Path, Path]:
         csr, key = create_certificate_request(common_name=name)
         cert = sign_node_certificate(
-            authority, csr, common_name=name, hostnames=["127.0.0.1"], usage=usage
+            signer, csr, common_name=name, hostnames=["127.0.0.1"], usage=usage
         )
         write_certificate(tmp_path / f"{name}.crt", cert)
         write_private_key(tmp_path / f"{name}.key", key)
         return tmp_path / f"{name}.crt", tmp_path / f"{name}.key"
 
     write_certificate(tmp_path / "ca.crt", authority.certificate_pem())
-    agent_cert, agent_key = issue("agent", "server")
-    caller_cert, caller_key = issue("caller", client_usage)
+    # The agent's client-CA file, one PEM or several (the switch-over bundle).
+    trusted = b"".join(a.certificate_pem() for a in (agent_trusts or [authority]))
+    write_certificate(tmp_path / "trusted.crt", trusted)
+    agent_cert, agent_key = issue("agent", "server", authority)
+    caller_cert, caller_key = issue("caller", client_usage, caller_authority or authority)
 
     server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     server_context.load_cert_chain(agent_cert, agent_key)
-    server_context.load_verify_locations(tmp_path / "ca.crt")
+    server_context.load_verify_locations(tmp_path / "trusted.crt")
     server_context.verify_mode = ssl.CERT_REQUIRED
     client_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     client_context.load_verify_locations(tmp_path / "ca.crt")
@@ -366,3 +377,76 @@ def test_the_agent_refuses_a_server_certificate_as_its_caller(tmp_path: Path) ->
 def test_the_agent_accepts_the_control_planes_client_certificate(tmp_path: Path) -> None:
     authority = _authority(tmp_path)
     assert _handshake(tmp_path, authority, "client")
+
+
+def _control_plane_authority(tmp_path: Path) -> CertificateAuthority:
+    directory = tmp_path / "control-plane"
+    directory.mkdir()
+    certificate_pem, key_pem = create_certificate_authority(
+        deployment_name="Frankfurt", role="control-plane CA"
+    )
+    write_certificate(directory / "ca", certificate_pem)
+    write_private_key(directory / "ca.key", key_pem)
+    return load_certificate_authority(directory / "ca", directory / "ca.key")
+
+
+def test_an_agent_trusting_the_control_plane_ca_refuses_every_node_certificate(
+    tmp_path: Path,
+) -> None:
+    # Even one from before the usage split, good as a client: no revocation
+    # list is needed for old copies to stop working.
+    nodes, control_plane = _authority(tmp_path), _control_plane_authority(tmp_path)
+    assert not _handshake(tmp_path, nodes, "client", agent_trusts=[control_plane])
+
+
+def test_an_agent_trusting_the_control_plane_ca_accepts_the_control_plane(
+    tmp_path: Path,
+) -> None:
+    nodes, control_plane = _authority(tmp_path), _control_plane_authority(tmp_path)
+    assert _handshake(
+        tmp_path, nodes, "client", caller_authority=control_plane, agent_trusts=[control_plane]
+    )
+
+
+def test_during_the_switch_an_agent_accepts_the_old_and_new_control_plane(
+    tmp_path: Path,
+) -> None:
+    nodes, control_plane = _authority(tmp_path), _control_plane_authority(tmp_path)
+    both = [nodes, control_plane]
+    (tmp_path / "old").mkdir()
+    (tmp_path / "new").mkdir()
+    assert _handshake(tmp_path / "old", nodes, "client", agent_trusts=both)
+    assert _handshake(
+        tmp_path / "new", nodes, "client", caller_authority=control_plane, agent_trusts=both
+    )
+
+
+def test_the_control_plane_ca_is_named_for_its_role(tmp_path: Path) -> None:
+    common_name = (
+        _control_plane_authority(tmp_path)
+        .certificate.subject.get_attributes_for_oid(NameOID.COMMON_NAME)[0]
+        .value
+    )
+    assert common_name == "Frankfurt control-plane CA"
+
+
+def test_the_issuing_authority_is_found_among_several(tmp_path: Path) -> None:
+    nodes, control_plane = _authority(tmp_path), _control_plane_authority(tmp_path)
+    csr, _ = create_certificate_request(common_name="nebula-control-plane")
+    write_certificate(
+        tmp_path / "client.crt",
+        sign_node_certificate(
+            control_plane, csr, common_name="cp", hostnames=["cp"], usage="client"
+        ),
+    )
+    authorities = [tmp_path / "missing", tmp_path / "ca", tmp_path / "control-plane" / "ca"]
+    assert issuing_authority_pem(tmp_path / "client.crt", authorities) == (
+        control_plane.certificate_pem()
+    )
+    assert issuing_authority_pem(tmp_path / "client.crt", [tmp_path / "ca"]) is None
+    assert nodes.certificate_pem() != control_plane.certificate_pem()
+
+
+def test_no_issuing_authority_for_a_missing_certificate(tmp_path: Path) -> None:
+    _authority(tmp_path)
+    assert issuing_authority_pem(tmp_path / "absent.crt", [tmp_path / "ca"]) is None

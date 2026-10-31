@@ -11,6 +11,9 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- Agents trust a CA of the control plane's own, which signs nothing else: no server's
+  certificate, old ones included, can call another server's agent. New installs use it
+  from the start; existing ones move over with `docs/runbooks/agent-certificates.md`.
 - Prometheus metrics for the API and the agent on the server's loopback, and a Grafana
   dashboard (`docs/runbooks/metrics.md`).
 - Audit log export as a hash chain (panel: Audit log → Export); `nebula-api audit-verify`

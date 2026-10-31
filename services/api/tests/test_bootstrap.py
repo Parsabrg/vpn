@@ -25,6 +25,7 @@ from nebula_api.bootstrap import (
     ensure_deployment_secret,
     ensure_node_authority,
     read_deployment_secret,
+    rotate_control_plane_identity,
 )
 from nebula_api.db.engine import SessionFactory
 from nebula_api.models.deployment import Deployment
@@ -393,3 +394,59 @@ class TestTheControlPlanesOwnCertificate:
 
         assert not (tmp_path / "client").exists()
         assert not (tmp_path / "client.key").exists()
+
+
+class TestMovingTheControlPlaneToItsOwnAuthority:
+    def _setup(self, tmp_path: Path) -> None:
+        ensure_node_authority(tmp_path / "node", tmp_path / "node.key", deployment_name="F")
+        ensure_node_authority(
+            tmp_path / "cp", tmp_path / "cp.key", deployment_name="F", role="control-plane CA"
+        )
+        ensure_control_plane_identity(
+            tmp_path / "client",
+            tmp_path / "client.key",
+            authority_certificate_path=tmp_path / "node",
+            authority_key_path=tmp_path / "node.key",
+        )
+
+    def _rotate(self, tmp_path: Path) -> Path:
+        return rotate_control_plane_identity(
+            tmp_path / "client",
+            tmp_path / "client.key",
+            authority_certificate_path=tmp_path / "cp",
+            authority_key_path=tmp_path / "cp.key",
+        )
+
+    def test_the_new_certificate_comes_from_the_control_plane_ca(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        self._rotate(tmp_path)
+
+        client = x509.load_pem_x509_certificate((tmp_path / "client").read_bytes())
+        control_plane = x509.load_pem_x509_certificate((tmp_path / "cp").read_bytes())
+        client.verify_directly_issued_by(control_plane)
+
+    def test_the_old_pair_is_kept_beside_it(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        original = (tmp_path / "client").read_bytes()
+
+        assert self._rotate(tmp_path) == tmp_path / "client.old"
+        assert (tmp_path / "client.old").read_bytes() == original
+        assert (tmp_path / "client.key.old").exists()
+
+    def test_a_second_rotation_never_overwrites_the_kept_pair(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        self._rotate(tmp_path)
+        current = (tmp_path / "client").read_bytes()
+
+        with pytest.raises(RuntimeError):
+            self._rotate(tmp_path)
+        assert (tmp_path / "client").read_bytes() == current
+
+    def test_nothing_moves_without_the_authority(self, tmp_path: Path) -> None:
+        self._setup(tmp_path)
+        (tmp_path / "cp.key").unlink()
+
+        with pytest.raises(PkiError):
+            self._rotate(tmp_path)
+        assert (tmp_path / "client").exists()
+        assert not (tmp_path / "client.old").exists()

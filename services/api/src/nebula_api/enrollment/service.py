@@ -135,6 +135,7 @@ class EnrollmentService:
         agent_host: str,
         agent_port: int,
         protocol_profiles: list[str] | None = None,
+        client_authority_pem: bytes | None = None,
     ) -> EnrolledNode:
         """Exchange a token for a signed certificate and a server record.
 
@@ -172,7 +173,7 @@ class EnrollmentService:
                     authority,
                     csr_pem,
                     common_name=row.label,
-                    hostnames=_certificate_hostnames(public_host, agent_host),
+                    hostnames=certificate_hostnames(public_host, agent_host),
                 )
             except PkiError:
                 # The token is deliberately left unspent. A node that sent a
@@ -223,7 +224,10 @@ class EnrollmentService:
             server_id=server_id,
             label=row.label,
             certificate_pem=certificate.decode("ascii"),
-            ca_certificate_pem=authority.certificate_pem().decode("ascii"),
+            # The CA the node trusts for clients; the node CA when none given.
+            ca_certificate_pem=(client_authority_pem or authority.certificate_pem()).decode(
+                "ascii"
+            ),
         )
 
     async def revoke(self, token_id: UUID) -> bool:
@@ -263,7 +267,7 @@ class EnrollmentService:
             return list(rows)
 
 
-def _certificate_hostnames(public_host: str, agent_host: str) -> list[str]:
+def certificate_hostnames(public_host: str, agent_host: str) -> list[str]:
     """Every name the control plane might dial this node by.
 
     Both, because they are frequently different: the public host is what

@@ -1,5 +1,6 @@
 import asyncio
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -1143,6 +1144,9 @@ def _patch_initialize(
 ) -> MagicMock:
     engine = MagicMock()
     engine.dispose = AsyncMock()
+    # Its own state directory: initialize writes the CAs and the client
+    # certificate there, and what is left from another test changes the output.
+    monkeypatch.setenv("NEBULA_STATE_DIR", tempfile.mkdtemp())
     monkeypatch.setattr(
         cli_module, "create_database_engine", lambda _url, **_kwargs: cast(AsyncEngine, engine)
     )
@@ -1182,6 +1186,9 @@ def test_initialize_reports_a_fresh_installation(
     assert str(row.id) in output
     assert "identity: generated now" in output
     assert "secret:   generated now" in output
+    assert "client CA: generated now" in output
+    # A new installation starts on the control-plane CA; nothing to rotate.
+    assert "from the node CA" not in output
 
 
 def test_initialize_run_again_generates_nothing(
@@ -1197,6 +1204,8 @@ def test_initialize_run_again_generates_nothing(
         has_admin=True,
     )
 
+    assert asyncio.run(cli_module.run_initialize(name="Frankfurt", admin_email=None)) == 0
+    capsys.readouterr()
     assert asyncio.run(cli_module.run_initialize(name="Frankfurt", admin_email=None)) == 0
 
     output = capsys.readouterr().out
@@ -1695,3 +1704,148 @@ def test_seed_direct_protocols_command_reports_every_profile(
     output = capsys.readouterr().out
     for _code, result in results:
         assert str(result.protocol_profile_id) in output
+
+
+def test_initialize_points_an_older_installation_at_the_rotation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from nebula_api.bootstrap import ensure_control_plane_identity, ensure_node_authority
+
+    _patch_initialize(
+        monkeypatch,
+        deployment=_deployment_row(),
+        created_deployment=False,
+        created_secret=False,
+        has_admin=True,
+    )
+    monkeypatch.setenv("NEBULA_STATE_DIR", str(tmp_path))
+    # Issued from the node CA, as before the control-plane CA existed.
+    ensure_node_authority(
+        tmp_path / "node_ca_certificate", tmp_path / "node_ca_key", deployment_name="Frankfurt"
+    )
+    ensure_control_plane_identity(
+        tmp_path / "agent_client_certificate",
+        tmp_path / "agent_client_key",
+        authority_certificate_path=tmp_path / "node_ca_certificate",
+        authority_key_path=tmp_path / "node_ca_key",
+    )
+    before = (tmp_path / "agent_client_certificate").read_bytes()
+
+    assert asyncio.run(cli_module.run_initialize(name="Frankfurt", admin_email=None)) == 0
+
+    assert "from the node CA" in capsys.readouterr().out
+    # Not switched on its own: agents may not trust the new CA yet.
+    assert (tmp_path / "agent_client_certificate").read_bytes() == before
+
+
+def test_rotating_moves_the_control_plane_onto_its_own_ca(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from cryptography import x509
+
+    from nebula_api.bootstrap import ensure_control_plane_identity, ensure_node_authority
+
+    monkeypatch.setenv("NEBULA_STATE_DIR", str(tmp_path))
+    ensure_node_authority(
+        tmp_path / "node_ca_certificate", tmp_path / "node_ca_key", deployment_name="F"
+    )
+    ensure_node_authority(
+        tmp_path / "client_ca_certificate",
+        tmp_path / "client_ca_key",
+        deployment_name="F",
+        role="control-plane CA",
+    )
+    ensure_control_plane_identity(
+        tmp_path / "agent_client_certificate",
+        tmp_path / "agent_client_key",
+        authority_certificate_path=tmp_path / "node_ca_certificate",
+        authority_key_path=tmp_path / "node_ca_key",
+    )
+
+    assert main(["rotate-control-plane-certificate"]) == 0
+
+    assert "agent_client_certificate.old" in capsys.readouterr().out
+    client = x509.load_pem_x509_certificate((tmp_path / "agent_client_certificate").read_bytes())
+    client.verify_directly_issued_by(
+        x509.load_pem_x509_certificate((tmp_path / "client_ca_certificate").read_bytes())
+    )
+
+
+def _patch_server_lookup(monkeypatch: pytest.MonkeyPatch, server: object) -> None:
+    engine = MagicMock()
+    engine.dispose = AsyncMock()
+    session = MagicMock()
+    session.scalar = AsyncMock(return_value=server)
+    session.__aenter__ = AsyncMock(return_value=session)
+    session.__aexit__ = AsyncMock(return_value=None)
+    monkeypatch.setattr(
+        cli_module, "create_database_engine", lambda _url, **_kwargs: cast(AsyncEngine, engine)
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "create_session_factory",
+        lambda _engine: cast(SessionFactory, lambda: session),
+    )
+
+
+def test_a_server_certificate_is_signed_for_the_names_on_record(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from cryptography import x509
+    from cryptography.x509.oid import ExtendedKeyUsageOID
+
+    from nebula_api.bootstrap import ensure_node_authority
+    from nebula_api.pki import create_certificate_request
+
+    monkeypatch.setenv("NEBULA_STATE_DIR", str(tmp_path))
+    ensure_node_authority(
+        tmp_path / "node_ca_certificate", tmp_path / "node_ca_key", deployment_name="F"
+    )
+    _patch_server_lookup(
+        monkeypatch,
+        SimpleNamespace(code="tehran", public_host="tehran.example.org", agent_host="192.0.2.7"),
+    )
+    csr, _ = create_certificate_request(common_name="anything-the-node-wrote")
+    (tmp_path / "request.csr").write_bytes(csr)
+
+    assert (
+        main(
+            [
+                "sign-server-certificate",
+                "--server",
+                "tehran",
+                "--csr",
+                str(tmp_path / "request.csr"),
+            ]
+        )
+        == 0
+    )
+
+    certificate = x509.load_pem_x509_certificate(capsys.readouterr().out.encode())
+    assert certificate.subject.rfc4514_string() == "CN=tehran"
+    names = certificate.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert names.get_values_for_type(x509.DNSName) == ["tehran.example.org"]
+    usage = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage).value
+    assert list(usage) == [ExtendedKeyUsageOID.SERVER_AUTH]
+
+
+def test_an_unknown_server_gets_no_certificate(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    from nebula_api.bootstrap import ensure_node_authority
+    from nebula_api.pki import create_certificate_request
+
+    monkeypatch.setenv("NEBULA_STATE_DIR", str(tmp_path))
+    ensure_node_authority(
+        tmp_path / "node_ca_certificate", tmp_path / "node_ca_key", deployment_name="F"
+    )
+    _patch_server_lookup(monkeypatch, None)
+    csr, _ = create_certificate_request(common_name="x")
+    (tmp_path / "request.csr").write_bytes(csr)
+
+    with pytest.raises(SystemExit) as exited:
+        main(
+            ["sign-server-certificate", "--server", "nope", "--csr", str(tmp_path / "request.csr")]
+        )
+    assert exited.value.code == 2
+    assert "BEGIN CERTIFICATE" not in capsys.readouterr().out
