@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Protocol, cast
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from nebula_api.auth.access_tokens import AccessTokenClaims, decode_access_token, issue_access_token
@@ -21,9 +21,15 @@ from nebula_api.auth.session_revocation import (
 )
 from nebula_api.db.engine import SessionFactory
 from nebula_api.identity import normalize_email, normalize_username
-from nebula_api.models.approval import PasswordResetToken
+from nebula_api.models.approval import (
+    AccountRequest,
+    AccountRequestEvent,
+    PasswordResetToken,
+    UserActivation,
+)
 from nebula_api.models.identity import Device, RefreshToken, User, UserSession
 from nebula_api.models.operations import AuditLog, EmailDelivery
+from nebula_api.models.topology import UserProtocolPermission, UserServerAssignment
 from nebula_api.models.types import AccountState, DevicePlatform, LifecycleState, TokenState
 from nebula_api.passwords import (
     hash_password_async,
@@ -586,6 +592,209 @@ class UserAuthService:
                 request_id=request_id,
             )
             await session.commit()
+
+    async def change_password(
+        self,
+        *,
+        principal: AuthenticatedUser,
+        current_password: str,
+        new_password: str,
+        request_id: UUID,
+    ) -> None:
+        """Change the password of a signed-in account.
+
+        The current password is asked for again: a session left open on a
+        borrowed phone must not be enough to lock the owner out. Every other
+        session ends, as after a reset; this one stays signed in.
+        """
+
+        now = self._now()
+        new_hash = await hash_password_async(new_password)
+        async with self._session_factory() as session:
+            user = await self._confirm_password(
+                session, principal, current_password, request_id=request_id, now=now
+            )
+            user.password_hash = new_hash
+            await session.execute(
+                update(PasswordResetToken)
+                .where(
+                    PasswordResetToken.user_id == user.id,
+                    PasswordResetToken.state == TokenState.ACTIVE,
+                )
+                .values(state=TokenState.REVOKED, revoked_at=now)
+            )
+            others = (
+                await session.scalars(
+                    select(UserSession.id).where(
+                        UserSession.user_id == user.id,
+                        UserSession.id != principal.session_id,
+                        UserSession.state == LifecycleState.ACTIVE,
+                    )
+                )
+            ).all()
+            if others:
+                await session.execute(
+                    update(UserSession)
+                    .where(UserSession.id.in_(others))
+                    .values(state=LifecycleState.REVOKED, revoked_at=now)
+                )
+                await session.execute(
+                    update(RefreshToken)
+                    .where(
+                        RefreshToken.session_id.in_(others),
+                        RefreshToken.state == TokenState.ACTIVE,
+                    )
+                    .values(state=TokenState.REVOKED, revoked_at=now)
+                )
+            _add_audit(
+                session,
+                actor_kind="user",
+                actor_id=user.id,
+                target_kind="user",
+                target_id=user.id,
+                event_code="password_changed",
+                outcome="succeeded",
+                request_id=request_id,
+                reason_code="changed_signed_in",
+            )
+            await session.commit()
+
+    async def delete_account(
+        self, *, principal: AuthenticatedUser, password: str, request_id: UUID
+    ) -> None:
+        """Delete the account, strictly: nothing left that names the person.
+
+        Removed: email, username and password; device names and hardware
+        hashes; every session, token, activation and reset link; the account
+        request and its history; every email queued for or sent to the
+        address; permissions and server assignments. Every VPN credential goes
+        to REVOKING, which reconciliation removes from each server.
+
+        Kept, under the account's random id and nothing else: audit rows and
+        traffic totals. The deletion's own audit row names no address.
+        Backups still hold the old data until they age out (30 days).
+        """
+
+        now = self._now()
+        async with self._session_factory() as session:
+            user = await self._confirm_password(
+                session, principal, password, request_id=request_id, now=now
+            )
+            address = user.email_normalized
+            devices = (await session.scalars(select(Device).where(Device.user_id == user.id))).all()
+            for device in devices:
+                if device.state != LifecycleState.REVOKED:
+                    device.state = LifecycleState.REVOKED
+                    device.revoked_at = now
+                await revoke_device_credentials(session, device.id, now)
+                # Kept as rows: traffic totals hang off their credentials.
+                device.name = "deleted"
+                device.hardware_hash = None
+                device.hardware_key_version = None
+                device.updated_at = now
+
+            session_ids = select(UserSession.id).where(UserSession.user_id == user.id)
+            await session.execute(
+                delete(RefreshToken).where(RefreshToken.session_id.in_(session_ids))
+            )
+            await session.execute(delete(UserSession).where(UserSession.user_id == user.id))
+            await session.execute(delete(UserActivation).where(UserActivation.user_id == user.id))
+            await session.execute(
+                delete(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
+            )
+            requests = select(AccountRequest.id).where(
+                or_(AccountRequest.user_id == user.id, AccountRequest.email_normalized == address)
+            )
+            await session.execute(
+                delete(AccountRequestEvent).where(AccountRequestEvent.request_id.in_(requests))
+            )
+            await session.execute(
+                delete(AccountRequest).where(
+                    or_(
+                        AccountRequest.user_id == user.id,
+                        AccountRequest.email_normalized == address,
+                    )
+                )
+            )
+            await session.execute(
+                delete(EmailDelivery).where(
+                    or_(
+                        func.lower(EmailDelivery.recipient_address) == address,
+                        and_(
+                            EmailDelivery.subject_kind == "user",
+                            EmailDelivery.subject_id == user.id,
+                        ),
+                    )
+                )
+            )
+            await session.execute(
+                delete(UserProtocolPermission).where(UserProtocolPermission.user_id == user.id)
+            )
+            await session.execute(
+                delete(UserServerAssignment).where(UserServerAssignment.user_id == user.id)
+            )
+
+            # Random, so it says nothing about the address it replaces.
+            placeholder = f"deleted-{uuid4().hex}@deleted.invalid"
+            user.email = placeholder
+            user.email_normalized = placeholder
+            user.username = None
+            user.username_normalized = None
+            user.password_hash = None
+            user.state = AccountState.DISABLED
+            user.disabled_at = now
+            _add_audit(
+                session,
+                actor_kind="user",
+                actor_id=user.id,
+                target_kind="user",
+                target_id=user.id,
+                event_code="identity_state_changed",
+                outcome="succeeded",
+                request_id=request_id,
+                reason_code="account_deleted",
+            )
+            await session.commit()
+
+    async def _confirm_password(
+        self,
+        session: AsyncSession,
+        principal: AuthenticatedUser,
+        password: str,
+        *,
+        request_id: UUID,
+        now: datetime,
+    ) -> User:
+        """The signed-in account, after its password checks out again."""
+
+        await self._require_rate_limit(
+            session,
+            buckets=(RateBucket("user-account", str(principal.user_id)),),
+            limit=self._settings.user_login_rate_limit,
+            request_id=request_id,
+            now=now,
+        )
+        user = await session.scalar(
+            select(User).where(User.id == principal.user_id).with_for_update()
+        )
+        valid = await verify_password_or_dummy_async(
+            user.password_hash if user is not None else None, password
+        )
+        if user is None or not valid or not _user_can_authenticate(user, now):
+            _add_audit(
+                session,
+                actor_kind="user",
+                actor_id=principal.user_id,
+                target_kind="user",
+                target_id=principal.user_id,
+                event_code="user_authenticated",
+                outcome="denied",
+                request_id=request_id,
+                reason_code="invalid_credentials",
+            )
+            await session.commit()
+            raise AuthenticationRejected("Authentication was not accepted")
+        return user
 
     async def _load_principal(self, claims: AccessTokenClaims) -> AuthenticatedUser:
         now = self._now()

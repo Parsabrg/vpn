@@ -14,8 +14,14 @@ from nebula_api.account.service import (
     DeviceRevocationRefused,
 )
 from nebula_api.auth.http import apply_auth_response_headers
+from nebula_api.auth.schemas import AccountDeletionRequest, PasswordChangeRequest
 from nebula_api.auth.user_authorization import require_user_session
-from nebula_api.auth.user_service import AuthenticatedUser
+from nebula_api.auth.user_service import (
+    AuthenticatedUser,
+    AuthenticationRateLimited,
+    AuthenticationRejected,
+    UserAuthService,
+)
 
 router = APIRouter(prefix="/v1/account", tags=["account"])
 _LOGGER = logging.getLogger(__name__)
@@ -112,5 +118,69 @@ async def revoke_device(
             status_code=status.HTTP_409_CONFLICT, detail=refusal.reason_code
         ) from refusal
 
+    apply_auth_response_headers(response)
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=dict(response.headers))
+
+
+def _auth_service(request: Request) -> UserAuthService:
+    service = getattr(request.app.state, "user_auth_service", None)
+    if service is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Authentication is temporarily unavailable",
+        )
+    return cast(UserAuthService, service)
+
+
+def _password_refused(error: AuthenticationRejected) -> HTTPException:
+    # 403, not 401: the session is fine, and the app signs out on a 401.
+    if isinstance(error, AuthenticationRateLimited):
+        return HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Request was not accepted",
+            headers={"Retry-After": str(error.retry_after_seconds)},
+        )
+    return HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="password_not_accepted")
+
+
+@router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+async def change_password(
+    payload: PasswordChangeRequest,
+    request: Request,
+    response: Response,
+    principal: Annotated[AuthenticatedUser, Depends(require_user_session)],
+) -> Response:
+    """Change the password; every other session ends, this one stays."""
+
+    try:
+        await _auth_service(request).change_password(
+            principal=principal,
+            current_password=payload.current_password.get_secret_value(),
+            new_password=payload.new_password.get_secret_value(),
+            request_id=uuid4(),
+        )
+    except AuthenticationRejected as error:
+        raise _password_refused(error) from None
+    apply_auth_response_headers(response)
+    return Response(status_code=status.HTTP_204_NO_CONTENT, headers=dict(response.headers))
+
+
+@router.post("/delete", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    payload: AccountDeletionRequest,
+    request: Request,
+    response: Response,
+    principal: Annotated[AuthenticatedUser, Depends(require_user_session)],
+) -> Response:
+    """Delete the account for good (see UserAuthService.delete_account)."""
+
+    try:
+        await _auth_service(request).delete_account(
+            principal=principal,
+            password=payload.password.get_secret_value(),
+            request_id=uuid4(),
+        )
+    except AuthenticationRejected as error:
+        raise _password_refused(error) from None
     apply_auth_response_headers(response)
     return Response(status_code=status.HTTP_204_NO_CONTENT, headers=dict(response.headers))
