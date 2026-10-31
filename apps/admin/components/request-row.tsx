@@ -7,6 +7,7 @@ import {
 } from "@/lib/account-requests-actions";
 import type { AccountRequestListItem } from "@/lib/account-requests";
 import { ConfirmDialog } from "./confirm-dialog";
+import { endedSession } from "@/lib/end-session";
 
 export function RequestRow({ request }: { request: AccountRequestListItem }) {
   const [approveOpen, setApproveOpen] = useState(false);
@@ -34,7 +35,7 @@ export function RequestRow({ request }: { request: AccountRequestListItem }) {
       if (result.ok) {
         setApproveOpen(false);
         setDecision("approved");
-      } else {
+      } else if (!endedSession(result)) {
         setError(result.message);
       }
     });
@@ -49,7 +50,7 @@ export function RequestRow({ request }: { request: AccountRequestListItem }) {
       if (result.ok) {
         setRejectOpen(false);
         setDecision("rejected");
-      } else {
+      } else if (!endedSession(result)) {
         setError(result.message);
       }
     });

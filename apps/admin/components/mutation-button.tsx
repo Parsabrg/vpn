@@ -4,6 +4,7 @@ import { useState, useTransition, type ReactNode } from "react";
 import type { ActionResult } from "@/lib/api/action-result";
 import { ConfirmDialog } from "./confirm-dialog";
 import { StepUpModal } from "./step-up-modal";
+import { endedSession } from "@/lib/end-session";
 
 interface MutationButtonProps<T> {
   triggerLabel: string;
@@ -46,6 +47,9 @@ export function MutationButton<T>({
       if (result.code === "step_up_required") {
         setConfirmOpen(false);
         setStepUpOpen(true);
+        return;
+      }
+      if (endedSession(result)) {
         return;
       }
       setError(result.message);

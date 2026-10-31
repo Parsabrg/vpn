@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { type JoinToken, mintJoinToken } from "@/lib/node-actions";
+import { endedSession } from "@/lib/end-session";
 
 /**
  * Adding a server: name it, then paste one command on it. Before this it
@@ -26,6 +27,9 @@ export function AddServerForm() {
     const result = await mintJoinToken(label);
     setPending(false);
     if (!result.ok) {
+      if (endedSession(result)) {
+        return;
+      }
       setError(result.message);
       return;
     }
