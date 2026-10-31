@@ -1,9 +1,11 @@
 """Request and response bodies for node enrollment."""
 
 from datetime import datetime
+from ipaddress import IPv4Address, IPv4Network
+from typing import Self
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class EnrollNodeRequest(BaseModel):
@@ -32,6 +34,21 @@ class EnrollNodeRequest(BaseModel):
     # The protocol profiles this node serves, by code, so it is offered for
     # them at once rather than after an administrator enables each by hand.
     protocol_profiles: list[str] = Field(default_factory=list, max_length=64)
+
+    # The node's WireGuard range and its own address in it, when it serves
+    # WireGuard. Without them no device can be given a WireGuard address here.
+    wireguard_client_pool: IPv4Network | None = None
+    wireguard_gateway_address: IPv4Address | None = None
+
+    @model_validator(mode="after")
+    def _wireguard_range_is_whole(self) -> Self:
+        pool, gateway = self.wireguard_client_pool, self.wireguard_gateway_address
+        if (pool is None) != (gateway is None):
+            raise ValueError("send the WireGuard pool and gateway together")
+        if pool is not None and gateway is not None:
+            if not pool.is_private or gateway not in pool:
+                raise ValueError("the WireGuard gateway must be in a private pool")
+        return self
 
 
 class EnrollNodeResponse(BaseModel):

@@ -546,6 +546,40 @@ class TestTheCommand:
         assert code == 0
         assert "enrolled as node-02" in capsys.readouterr().out
 
+    def test_a_wireguard_node_sends_its_range(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # 2026-10-31: a joined server never sent it, and WireGuard there could
+        # give no device an address until it was set by hand.
+        from ipaddress import ip_interface, ip_network
+
+        received = _stub_control_plane(monkeypatch)
+        settings = self._settings(tmp_path)
+        settings.wg_driver = "native"
+        settings.wg_server_address = ip_interface("10.77.0.1/20")
+        settings.wg_client_pool = ip_network("10.77.0.0/20")
+        monkeypatch.setattr(enrollment, "get_settings", lambda: settings)
+        token_file = tmp_path / "token"
+        token_file.write_text("v1.aaaa")
+
+        enrollment.main(["--control-plane", CONTROL_PLANE, "--token-file", str(token_file)])
+
+        assert received[0]["wireguard_client_pool"] == "10.77.0.0/20"
+        assert received[0]["wireguard_gateway_address"] == "10.77.0.1"
+        assert "wireguard-native" in received[0]["protocol_profiles"]
+
+    def test_a_node_without_wireguard_sends_no_range(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        received = _stub_control_plane(monkeypatch)
+        monkeypatch.setattr(enrollment, "get_settings", lambda: self._settings(tmp_path))
+        token_file = tmp_path / "token"
+        token_file.write_text("v1.aaaa")
+
+        enrollment.main(["--control-plane", CONTROL_PLANE, "--token-file", str(token_file)])
+
+        assert "wireguard_client_pool" not in received[0]
+
     def test_the_agent_host_defaults_to_the_public_one(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
