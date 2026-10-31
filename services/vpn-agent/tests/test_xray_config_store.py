@@ -358,7 +358,8 @@ def test_localhost_is_refused_by_name_and_never_resolved_by_the_host() -> None:
     assert internet["tag"] == "internet"
     # IPv4 only: `UseIP` mixes families per connection, and YouTube's
     # streams, tied to the address that asked, would not play.
-    assert internet["settings"]["domainStrategy"] == "UseIPv4"
+    assert internet["streamSettings"]["sockopt"]["domainStrategy"] == "UseIPv4"
+    assert "settings" not in internet
     by_name = [rule for rule in config["routing"]["rules"] if "domain" in rule]
     assert by_name == [
         {
