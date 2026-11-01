@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { assignServer, grantPermissions } from "@/lib/access-actions";
 import { endedSession } from "@/lib/end-session";
+import { StepUpModal } from "./step-up-modal";
 
 /**
  * Says when a user cannot connect yet, and fixes it in one click. Approving
@@ -26,6 +27,10 @@ export function AccessReadiness({
   const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The step waiting on a fresh authenticator code, retried once verified.
+  const [awaitingCode, setAwaitingCode] = useState<
+    null | (() => Promise<{ ok: boolean; code?: string; message?: string }>)
+  >(null);
 
   if (hasProtocol && hasServer) {
     return null;
@@ -40,6 +45,12 @@ export function AccessReadiness({
     setPending(false);
     if (!result.ok) {
       if (endedSession(result)) {
+        return;
+      }
+      // Asked for the code the other actions ask for, rather than showing
+      // "Step-up verification is required" with no way forward.
+      if (result.code === "step_up_required") {
+        setAwaitingCode(() => step);
         return;
       }
       setError(result.message ?? "Something went wrong.");
@@ -94,6 +105,17 @@ export function AccessReadiness({
         ) : null}
       </div>
       {error ? <p role="alert">{error}</p> : null}
+      <StepUpModal
+        open={awaitingCode !== null}
+        onCancel={() => setAwaitingCode(null)}
+        onVerified={() => {
+          const step = awaitingCode;
+          setAwaitingCode(null);
+          if (step) {
+            void run(step);
+          }
+        }}
+      />
     </div>
   );
 }

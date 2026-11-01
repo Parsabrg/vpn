@@ -3,6 +3,7 @@ import { listAuditLog } from "@/lib/audit-log";
 import { DataTable } from "@/components/data-table";
 import { FilterBar, type FilterField } from "@/components/filter-bar";
 import { PaginationControls } from "@/components/pagination-controls";
+import { LocalTime } from "@/components/local-time";
 
 export const metadata: Metadata = {
   title: "Audit log",
@@ -161,7 +162,7 @@ export default async function AuditLogPage({
         rows={page.items.map((item) => ({
           key: item.id,
           cells: [
-            new Date(item.recordedAt).toLocaleString(),
+            <LocalTime key="time-1" value={item.recordedAt} />,
             item.actorId
               ? `${item.actorKind} (${item.actorId})`
               : item.actorKind,

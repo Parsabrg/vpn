@@ -4,6 +4,7 @@ import { listAllAssignments } from "@/lib/access";
 import { DataTable } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PaginationControls } from "@/components/pagination-controls";
+import { LocalTime } from "@/components/local-time";
 
 export const metadata: Metadata = {
   title: "Assignments",
@@ -48,10 +49,12 @@ export default async function AssignmentsPage({
                 </Link>,
                 item.serverDisplayName,
                 item.state,
-                new Date(item.assignedAt).toLocaleString(),
-                item.expiresAt
-                  ? new Date(item.expiresAt).toLocaleString()
-                  : "—",
+                <LocalTime key="time-1" value={item.assignedAt} />,
+                item.expiresAt ? (
+                  <LocalTime key="time-2" value={item.expiresAt} />
+                ) : (
+                  "—"
+                ),
               ],
             }))}
           />

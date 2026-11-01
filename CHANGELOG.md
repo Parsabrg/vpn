@@ -18,6 +18,11 @@ updated (`install.sh` rerun, or the deploy in `docs/runbooks/deployment.md`).
 - A refused token refresh (rate limit, server busy) no longer disconnects the VPN (#20).
 
 ### Servers
+- Admin panel fixes from a full sweep: times show in your own time zone (labelled) with
+  no browser error; the user page's one-click fixes ask for the authenticator code;
+  Security flags a missing backup and an old agent certificate and lists the
+  control-plane CA; "All in sync" no longer shows beside an unreachable agent; a
+  proper not-found page.
 - The agent's Xray config sets the outbound's IPv4-only resolving in `sockopt`, where
   Xray 26.10 wants it (no deprecation warning; same behaviour).
 - `infrastructure/check-protocols.py` proves every protocol a server offers carries

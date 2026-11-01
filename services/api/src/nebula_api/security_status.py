@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from nebula_api.db.schema import schema_is_current
+from nebula_api.pki import issuing_authority_pem
 from nebula_api.settings import Settings
 from nebula_api.topology_admin.service import TopologyAdminService
 
@@ -109,6 +110,7 @@ class SecurityStatusService:
             self._public_tls,
             self._agent_certificate,
             self._node_ca,
+            self._client_ca,
         ]
         results = list(await asyncio.gather(*(probe() for probe in probes)))
         results.append(self._keys())
@@ -195,7 +197,8 @@ class SecurityStatusService:
         except Exception:
             newest = None
         if newest is None:
-            return Check("backup", "Last backup", "unknown", "No completed backup recorded")
+            # Never backed up is something to act on, not something unknown.
+            return Check("backup", "Last backup", "warning", "No completed backup recorded")
         age = self._clock() - newest
         return Check(
             "backup",
@@ -244,10 +247,33 @@ class SecurityStatusService:
         return self._certificate_check(key, label, certificate)
 
     async def _agent_certificate(self) -> Check:
-        return self._file_certificate(
+        check = self._file_certificate(
             "agent_certificate",
             "Agent client certificate",
             self._settings.resolved_agent_client_cert_file,
+        )
+        # Still from the node CA while a control-plane CA exists: any node's
+        # certificate is then good enough to call agents as the control plane.
+        if check.status == "ok" and self._settings.resolved_client_ca_certificate_file.exists():
+            issued_by_own = issuing_authority_pem(
+                self._settings.resolved_agent_client_cert_file,
+                [self._settings.resolved_client_ca_certificate_file],
+            )
+            if issued_by_own is None:
+                return Check(
+                    check.key,
+                    check.label,
+                    "warning",
+                    "Issued by the node CA; move it (docs/runbooks/agent-certificates.md)",
+                    check.observed_at,
+                )
+        return check
+
+    async def _client_ca(self) -> Check:
+        return self._file_certificate(
+            "client_ca",
+            "Control-plane certificate authority",
+            self._settings.resolved_client_ca_certificate_file,
         )
 
     async def _node_ca(self) -> Check:

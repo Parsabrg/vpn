@@ -5,6 +5,7 @@ import { assignServer, revokeAssignment } from "@/lib/access-actions";
 import type { UserAssignmentListItem } from "@/lib/access";
 import type { VpnServerListItem } from "@/lib/topology";
 import { MutationButton } from "./mutation-button";
+import { LocalTime } from "@/components/local-time";
 
 function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   const index = items.findIndex((current) => current.id === item.id);
@@ -65,7 +66,7 @@ export function AssignmentsPanel({
                     {assignment.state}
                   </span>
                 </td>
-                <td>{new Date(assignment.assignedAt).toLocaleString()}</td>
+                <td>{<LocalTime value={assignment.assignedAt} />}</td>
                 <td>
                   {assignment.state === "active" ? (
                     <MutationButton

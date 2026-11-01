@@ -4,6 +4,7 @@ import { listUsers } from "@/lib/users";
 import { DataTable } from "@/components/data-table";
 import { FilterBar, type FilterField } from "@/components/filter-bar";
 import { PaginationControls } from "@/components/pagination-controls";
+import { LocalTime } from "@/components/local-time";
 
 export const metadata: Metadata = {
   title: "Users",
@@ -76,7 +77,7 @@ export default async function UsersPage({
             user.username ?? "—",
             user.state,
             user.deviceLimit,
-            new Date(user.createdAt).toLocaleString(),
+            <LocalTime key="time-1" value={user.createdAt} />,
           ],
         }))}
       />

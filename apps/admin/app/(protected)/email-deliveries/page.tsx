@@ -3,6 +3,7 @@ import { listEmailDeliveries } from "@/lib/email-deliveries";
 import { DataTable } from "@/components/data-table";
 import { FilterBar, type FilterField } from "@/components/filter-bar";
 import { PaginationControls } from "@/components/pagination-controls";
+import { LocalTime } from "@/components/local-time";
 
 export const metadata: Metadata = {
   title: "Email deliveries",
@@ -101,7 +102,7 @@ export default async function EmailDeliveriesPage({
             `${item.subjectKind} (${item.subjectId})`,
             item.state,
             item.attemptCount,
-            item.sentAt ? new Date(item.sentAt).toLocaleString() : "—",
+            item.sentAt ? <LocalTime value={item.sentAt} /> : "—",
             item.resultCode ?? "—",
           ],
         }))}

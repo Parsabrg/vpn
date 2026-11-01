@@ -9,6 +9,7 @@ import {
 import type { UserPermissionListItem } from "@/lib/access";
 import type { ProtocolProfileListItem } from "@/lib/topology";
 import { MutationButton } from "./mutation-button";
+import { LocalTime } from "@/components/local-time";
 
 function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   const index = items.findIndex((current) => current.id === item.id);
@@ -69,7 +70,7 @@ export function PermissionsPanel({
                     {permission.state}
                   </span>
                 </td>
-                <td>{new Date(permission.grantedAt).toLocaleString()}</td>
+                <td>{<LocalTime value={permission.grantedAt} />}</td>
                 <td>
                   {permission.state === "enabled" ? (
                     <MutationButton

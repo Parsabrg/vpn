@@ -8,6 +8,7 @@ import {
 import type { AccountRequestListItem } from "@/lib/account-requests";
 import { ConfirmDialog } from "./confirm-dialog";
 import { endedSession } from "@/lib/end-session";
+import { LocalTime } from "@/components/local-time";
 
 export function RequestRow({ request }: { request: AccountRequestListItem }) {
   const [approveOpen, setApproveOpen] = useState(false);
@@ -56,7 +57,7 @@ export function RequestRow({ request }: { request: AccountRequestListItem }) {
     });
   }
 
-  const requestedAt = new Date(request.createdAt).toLocaleString();
+  const requestedAt = <LocalTime value={request.createdAt} />;
 
   if (decision) {
     return (

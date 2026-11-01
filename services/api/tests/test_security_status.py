@@ -71,6 +71,7 @@ class Scripted(SecurityStatusService):
         agent.write_bytes(_certificate(200).public_bytes(Encoding.PEM))
         settings = Settings(
             env="test",
+            state_dir=tmp,
             agent_client_cert_file=agent,
             node_ca_certificate_file=tmp / "missing.pem",
         )
@@ -132,7 +133,9 @@ def test_what_cannot_be_read_is_unknown_not_ok(tmp_path: Path, monkeypatch: Any)
 
     checks = _checks(Scripted(tmp_path, answers, public=unreachable), monkeypatch)
 
-    assert checks["backup"].status == "unknown"
+    # Never backed up is to act on, so it counts as needing attention.
+    assert checks["backup"].status == "warning"
+    assert checks["backup"].detail == "No completed backup recorded"
     assert checks["usage"].status == "unknown"
     assert checks["tls"].status == "unknown"
     assert checks["node_ca"].status == "unknown"  # the file does not exist
@@ -221,3 +224,51 @@ def test_the_route_returns_the_checks_uncached() -> None:
 
 def test_the_route_is_unavailable_without_its_service() -> None:
     assert _get(None).status_code == 503
+
+
+def _write_authorities(tmp: Path) -> tuple[Path, Path]:
+    from nebula_api.bootstrap import ensure_node_authority
+
+    ensure_node_authority(tmp / "node_ca", tmp / "node_ca.key", deployment_name="F")
+    ensure_node_authority(
+        tmp / "client_ca_certificate",
+        tmp / "client_ca_key",
+        deployment_name="F",
+        role="control-plane CA",
+    )
+    return tmp / "node_ca", tmp / "node_ca.key"
+
+
+def _service_with_client_certificate(tmp: Path, *, own_ca: bool) -> Scripted:
+    from nebula_api.bootstrap import ensure_control_plane_identity
+
+    node_ca, node_key = _write_authorities(tmp)
+    ensure_control_plane_identity(
+        tmp / "client.pem",
+        tmp / "client.key",
+        authority_certificate_path=tmp / "client_ca_certificate" if own_ca else node_ca,
+        authority_key_path=tmp / "client_ca_key" if own_ca else node_key,
+    )
+    service = Scripted(tmp, HEALTHY)
+    service._settings = service._settings.model_copy(
+        update={"agent_client_cert_file": tmp / "client.pem"}
+    )
+    return service
+
+
+def test_the_control_plane_ca_has_its_own_row(tmp_path: Path, monkeypatch: Any) -> None:
+    checks = _checks(_service_with_client_certificate(tmp_path, own_ca=True), monkeypatch)
+
+    assert checks["client_ca"].label == "Control-plane certificate authority"
+    assert checks["client_ca"].status == "ok"
+    assert checks["agent_certificate"].status == "ok"
+
+
+def test_a_client_certificate_still_from_the_node_ca_is_flagged(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    # Any node's certificate is then enough to act as the control plane.
+    checks = _checks(_service_with_client_certificate(tmp_path, own_ca=False), monkeypatch)
+
+    assert checks["agent_certificate"].status == "warning"
+    assert "node CA" in checks["agent_certificate"].detail
