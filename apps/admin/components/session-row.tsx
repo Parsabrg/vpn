@@ -4,6 +4,7 @@ import { useState } from "react";
 import { revokeUserSession } from "@/lib/users-actions";
 import type { UserSessionListItem } from "@/lib/users";
 import { MutationButton } from "./mutation-button";
+import { LocalTime } from "@/components/local-time";
 
 export function SessionRow({
   userId,
@@ -20,11 +21,9 @@ export function SessionRow({
       <td>
         <span className={`badge badge--${current.state}`}>{current.state}</span>
       </td>
-      <td>{new Date(current.expiresAt).toLocaleString()}</td>
+      <td>{<LocalTime value={current.expiresAt} />}</td>
       <td>
-        {current.lastSeenAt
-          ? new Date(current.lastSeenAt).toLocaleString()
-          : "—"}
+        {current.lastSeenAt ? <LocalTime value={current.lastSeenAt} /> : "—"}
       </td>
       <td>
         {current.state === "active" ? (

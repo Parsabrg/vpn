@@ -13,6 +13,7 @@ import { DeviceLimitControl } from "@/components/device-limit-control";
 import { DnsProfileControl } from "@/components/dns-profile-control";
 import { ExpiryControl } from "@/components/expiry-control";
 import { TrafficAllowancePanel } from "@/components/traffic-allowance-panel";
+import { LocalTime } from "@/components/local-time";
 
 export const metadata: Metadata = {
   title: "User detail",
@@ -89,14 +90,12 @@ export default async function UserDetailPage({
         </div>
         <div>
           <dt>Created</dt>
-          <dd>{new Date(user.createdAt).toLocaleString()}</dd>
+          <dd>{<LocalTime value={user.createdAt} />}</dd>
         </div>
         <div>
           <dt>Activated</dt>
           <dd>
-            {user.activatedAt
-              ? new Date(user.activatedAt).toLocaleString()
-              : "—"}
+            {user.activatedAt ? <LocalTime value={user.activatedAt} /> : "—"}
           </dd>
         </div>
         <div>
@@ -108,7 +107,7 @@ export default async function UserDetailPage({
         <div>
           <dt>Disabled</dt>
           <dd>
-            {user.disabledAt ? new Date(user.disabledAt).toLocaleString() : "—"}
+            {user.disabledAt ? <LocalTime value={user.disabledAt} /> : "—"}
           </dd>
         </div>
       </dl>

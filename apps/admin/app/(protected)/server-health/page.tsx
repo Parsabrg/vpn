@@ -117,6 +117,11 @@ export default async function ServerHealthPage({
   const xrayByServerId = new Map(
     xrayHealth.map((entry) => [entry.serverId, entry]),
   );
+  // Servers whose agent did not answer: nothing on them could be checked,
+  // so "All in sync" would say more than is known.
+  const unchecked = servers.filter(
+    (server) => healthByServerId.get(server.id)?.state === "unreachable",
+  ).length;
   const outstanding = reconciliation.reduce(
     (sum, entry) =>
       sum +
@@ -259,9 +264,11 @@ export default async function ServerHealthPage({
       <section aria-labelledby="reconciliation-title">
         <h2 id="reconciliation-title">Reconciliation</h2>
         <p className="section-note">
-          {outstanding === 0
-            ? "All in sync: every credential is where it should be."
-            : `${outstanding} record${outstanding === 1 ? " is" : "s are"} waiting or need review.`}
+          {outstanding > 0
+            ? `${outstanding} record${outstanding === 1 ? " is" : "s are"} waiting or need review.`
+            : unchecked > 0
+              ? `Not checked: ${unchecked === 1 ? "one server's agent is" : `${unchecked} servers' agents are`} unreachable.`
+              : "All in sync: every credential is where it should be."}
         </p>
         <p>
           <ReconcileNowControl />

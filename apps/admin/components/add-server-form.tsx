@@ -3,6 +3,7 @@
 import { type FormEvent, useState } from "react";
 import { type JoinToken, mintJoinToken } from "@/lib/node-actions";
 import { endedSession } from "@/lib/end-session";
+import { LocalTime } from "@/components/local-time";
 
 /**
  * Adding a server: name it, then paste one command on it. Before this it
@@ -43,7 +44,7 @@ export function AddServerForm() {
         <p role="status">
           On the new server (Ubuntu or Debian), clone Nebula, then run this in
           its folder. It works once, until{" "}
-          {new Date(joined.expiresAt).toLocaleString()}.
+          {<LocalTime value={joined.expiresAt} />}.
         </p>
         <pre className="command" aria-label="Command for the new server">
           {command}

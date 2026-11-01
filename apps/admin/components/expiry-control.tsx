@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { setExpiry } from "@/lib/users-actions";
 import { MutationButton } from "./mutation-button";
+import { LocalTime } from "@/components/local-time";
 
 /** `<input type="datetime-local">` wants local time without a zone. */
 function toLocalInput(iso: string): string {
@@ -29,7 +30,7 @@ export function ExpiryControl({
 
   return (
     <>
-      {expiresAt ? new Date(expiresAt).toLocaleString() : "Never"}{" "}
+      {expiresAt ? <LocalTime value={expiresAt} /> : "Never"}{" "}
       <MutationButton
         triggerLabel={expiresAt ? "Change" : "Set expiry"}
         triggerClassName="button"

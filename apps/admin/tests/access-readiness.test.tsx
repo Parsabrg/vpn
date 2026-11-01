@@ -9,6 +9,22 @@ const assignServer = vi.hoisted(() => vi.fn());
 
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 vi.mock("@/lib/access-actions", () => ({ grantPermissions, assignServer }));
+// The code dialog itself is tested on its own; here only that it opens and
+// what happens once the code is verified.
+vi.mock("@/components/step-up-modal", () => ({
+  StepUpModal: ({
+    open,
+    onVerified,
+  }: {
+    open: boolean;
+    onVerified: () => void;
+  }) =>
+    open ? (
+      <button type="button" onClick={onVerified}>
+        Verify code
+      </button>
+    ) : null,
+}));
 
 describe("AccessReadiness", () => {
   it("says nothing once the user can connect", () => {
@@ -53,5 +69,37 @@ describe("AccessReadiness", () => {
       ["u1", "s2"],
     ]);
     expect(refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("asks for the authenticator code and then does it", async () => {
+    // 2026-11-01: these buttons only printed "Step-up verification is
+    // required" and stopped.
+    grantPermissions
+      .mockResolvedValueOnce({
+        ok: false,
+        code: "step_up_required",
+        message: "Step-up verification is required",
+      })
+      .mockResolvedValueOnce({ ok: true, data: [] });
+    refresh.mockClear();
+    const user = userEvent.setup();
+    render(
+      <AccessReadiness
+        userId="u1"
+        hasProtocol={false}
+        hasServer
+        missingProfileIds={["p1"]}
+        missingServerIds={[]}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Grant all protocols" }),
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Verify code" }));
+
+    expect(grantPermissions).toHaveBeenCalledTimes(2);
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 });

@@ -22,18 +22,26 @@ export default async function OverviewPage() {
 
       <section className="status-grid" aria-label="Administration summary">
         <StatTile
-          label="Pending requests"
+          label={
+            pendingRequests.length === 1
+              ? "Pending request"
+              : "Pending requests"
+          }
           value={pendingRequests.length}
           href="/requests"
         />
         <StatTile
-          label="Active users"
+          label={activeUsers.total === 1 ? "Active user" : "Active users"}
           value={activeUsers.total}
+          href="/users?state=active"
+        />
+        <StatTile
+          label={totalUsers.total === 1 ? "User in total" : "Users in total"}
+          value={totalUsers.total}
           href="/users"
         />
-        <StatTile label="Total users" value={totalUsers.total} href="/users" />
         <StatTile
-          label="VPN servers"
+          label={servers.length === 1 ? "VPN server" : "VPN servers"}
           value={servers.length}
           href="/server-health"
         />

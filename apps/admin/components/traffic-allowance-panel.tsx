@@ -4,6 +4,7 @@ import { useState } from "react";
 import { grantTrafficQuota } from "@/lib/users-actions";
 import type { TrafficAllowance } from "@/lib/users";
 import { MutationButton } from "./mutation-button";
+import { LocalTime } from "@/components/local-time";
 
 const KIB = 1024;
 
@@ -106,8 +107,8 @@ export function TrafficAllowancePanel({
       {isCutOff ? (
         <p role="status">
           This account ran out on{" "}
-          {new Date(allowance.exhaustedAt as string).toLocaleString()} and its
-          VPN credentials were revoked. Granting a new allowance lets it connect
+          {<LocalTime value={allowance.exhaustedAt as string} />} and its VPN
+          credentials were revoked. Granting a new allowance lets it connect
           again.
         </p>
       ) : null}
